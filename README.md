@@ -31,11 +31,42 @@ Mac Explorer 面向习惯 Windows 文件资源管理器的 Mac 用户：熟悉�
 
 | 平台 | 支持情况 |
 | --- | --- |
-| Apple Silicon（M 系列芯片） | 提供 DMG 安装包与 ZIP 便携包 |
+| Apple Silicon（M 系列芯片） | 提供 DMG 安装包与 ZIP 应用包 |
 | 系统版本 | 构建目标为 macOS 13+；最低版本尚未在实机回归 |
 | Intel Mac / Windows / Linux | 暂未提供构建 |
 
-正式发布包经过 **Developer ID 签名、Apple 公证与票据装订**；每次发布附带 `SHA256SUMS.txt`。从同一 Release 下载校验文件后，可运行 `shasum -a 256 -c SHA256SUMS.txt` 校验对应下载文件；只下载一个安装包时，另一个未下载文件会提示不存在。
+当前下载包使用 **临时签名（ad-hoc）**，不包含 Developer ID 开发者证书，**未经 Apple 公证**。macOS 首次打开时可能拦截，需要由你确认是否允许运行。
+
+### 首次打开被 macOS 拦截
+
+1. 先把应用复制到 **Applications**，再尝试打开一次。
+2. 如果提示“无法验证开发者”或“Apple 无法检查是否包含恶意软件”，关闭提示，进入 **系统设置 → 隐私与安全性**。
+3. 找到 Mac Explorer 的拦截提示，点击 **仍要打开**，按系统要求验证身份并确认打开。该选项通常在尝试启动后出现。
+
+这是 Apple 提供的单个应用例外流程，详见 [Apple 安装说明](https://support.apple.com/zh-cn/102445)。无需关闭系统 Gatekeeper 或修改全局安全设置。
+
+<details>
+<summary>仍提示“应用已损坏”怎么办？</summary>
+
+先重新下载，并按下方步骤核对 SHA-256。如果校验不一致，请勿运行。如果校验一致、确认下载自本仓库，仍被下载隔离标记拦截，可在终端对这一个应用移除隔离标记：
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Mac Explorer.app"
+```
+
+这会移除该应用的下载隔离标记，不会补上 Apple 公证。若安装在个人 Applications 目录，将路径改成 `"$HOME/Applications/Mac Explorer.app"`。不要把命令用于不明来源的软件；若系统明确提示恶意软件，不要用此方法继续运行。
+
+</details>
+
+### 校验下载文件
+
+每次发布附带 `SHA256SUMS.txt`。在下载目录运行以下命令，并将输出与同一 Release 中的校验文件对照：
+
+```sh
+shasum -a 256 Mac-Explorer-0.1.14-mac-arm64.dmg
+```
+
+使用 ZIP 时，对 ZIP 文件执行相同校验即可。
 
 ## 熟悉的操作，真正的 Mac 文件
 
@@ -150,9 +181,9 @@ npm run dev
 | `npm run test:archive` / `npm run test:compression` | 归档浏览、解压、压缩与文件保留 |
 | `npm run test:external` | 外部路径打开、文件定位与请求排队 |
 | `npm run package` | 本机体验包：ad-hoc 签名，未公证 |
-| `npm run package:release` | Developer ID 签名、公证、DMG / ZIP 与 SHA-256 校验文件 |
+| `npm run package:release` | 临时签名 DMG / ZIP 与 SHA-256 校验文件，无需证书 |
 
-正式打包需通过环境变量提供 `CSC_NAME`（签名身份名称）和 `APPLE_NOTARY_PROFILE`（已保存在钥匙串中的公证配置名）；自定义签名钥匙串可设置 `CSC_KEYCHAIN`。构建不会自动上传 GitHub，签名或公证失败会停止。请勿把证书、私钥或凭证提交到仓库。
+`package:release` 固定使用临时签名，禁用签名身份自动发现，不读取 Developer ID 或公证凭证，也不提交 Apple 公证。产物位于 `release/adhoc-版本号/`；构建不会自动上传 GitHub。
 
 ```text
 src/          React 界面、样式与主题

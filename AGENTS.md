@@ -19,7 +19,7 @@ Use Node.js 22.12+, macOS, and Xcode Command Line Tools. Builds compile the Swif
 - `npm run test:archive`: verify preview, extraction destinations, and archive safety in temporary directories.
 - `npm run test:icons`: verify icon scaling, Retina resolution, and address editing.
 - `npm run package`: produce an ad-hoc-signed Apple Silicon `.app`.
-- `npm run package:release`: create Developer ID-signed, notarized DMG/ZIP artifacts; requires `CSC_NAME` and `APPLE_NOTARY_PROFILE`.
+- `npm run package:release`: create ad-hoc-signed, unnotarized DMG/ZIP artifacts without developer certificates.
 
 ## Coding Style & Naming Conventions
 

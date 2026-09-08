@@ -1,6 +1,6 @@
 {
   "name": "mac-explorer",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "private": true,
   "description": "A Windows 11-style file explorer for macOS",
   "main": "dist-electron/main.cjs",
