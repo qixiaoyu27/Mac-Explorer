@@ -1,0 +1,38 @@
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import type { ExplorerAPI } from '../shared/types';
+
+const api: ExplorerAPI = {
+  bootstrap: () => ipcRenderer.invoke('bootstrap'),
+  setTheme: mode => ipcRenderer.invoke('set-theme', mode),
+  list: path => ipcRenderer.invoke('list', path),
+  search: (path, query, hidden) => ipcRenderer.invoke('search', path, query, hidden),
+  cancelSearch: () => ipcRenderer.invoke('cancel-search'),
+  open: path => ipcRenderer.invoke('open', path),
+  compressArchive: paths => ipcRenderer.invoke('compress-archive', paths),
+  openArchiveFile: (path, member) => ipcRenderer.invoke('open-archive-file', path, member),
+  extractArchive: (path, selected, mode) => ipcRenderer.invoke('extract-archive', path, selected, mode),
+  openWith: paths => ipcRenderer.invoke('open-with', paths),
+  quickLook: path => ipcRenderer.invoke('quick-look', path),
+  reveal: path => ipcRenderer.invoke('reveal', path),
+  openTerminal: path => ipcRenderer.invoke('open-terminal', path),
+  share: paths => ipcRenderer.invoke('share', paths),
+  info: path => ipcRenderer.invoke('info', path),
+  preview: path => ipcRenderer.invoke('preview', path),
+  icon: (path, pixels) => ipcRenderer.invoke('icon', path, pixels),
+  create: (parent, name, directory) => ipcRenderer.invoke('create', parent, name, directory),
+  rename: (path, name) => ipcRenderer.invoke('rename', path, name),
+  trash: paths => ipcRenderer.invoke('trash', paths),
+  clipboardSet: (paths, cut) => ipcRenderer.invoke('clipboard-set', paths, cut),
+  clipboardGet: () => ipcRenderer.invoke('clipboard-get'),
+  paste: parent => ipcRenderer.invoke('paste', parent),
+  copyTo: (paths, parent) => ipcRenderer.invoke('copy-to', paths, parent),
+  history: () => ipcRenderer.invoke('history'),
+  undo: () => ipcRenderer.invoke('undo'),
+  copyText: text => ipcRenderer.invoke('copy-text', text),
+  chooseFolder: () => ipcRenderer.invoke('choose-folder'),
+  filePath: file => webUtils.getPathForFile(file),
+  watch: path => ipcRenderer.invoke('watch', path),
+  onDirectoryChange: callback => { const listener = () => callback(); ipcRenderer.on('directory-changed', listener); return () => ipcRenderer.removeListener('directory-changed', listener); },
+  onAction: callback => { const listener = (_event: unknown, action: string) => callback(action); ipcRenderer.on('action', listener); return () => ipcRenderer.removeListener('action', listener); },
+};
+contextBridge.exposeInMainWorld('explorer', api);

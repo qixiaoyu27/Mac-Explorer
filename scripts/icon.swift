@@ -1,0 +1,32 @@
+import AppKit
+import Foundation
+
+let output = CommandLine.arguments[1]
+let image = NSImage(size: NSSize(width: 1024, height: 1024))
+image.lockFocus()
+NSColor(calibratedRed: 0.96, green: 0.97, blue: 0.99, alpha: 1).setFill()
+NSBezierPath(roundedRect: NSRect(x: 42, y: 42, width: 940, height: 940), xRadius: 205, yRadius: 205).fill()
+let back = NSBezierPath()
+back.move(to: NSPoint(x: 158, y: 326))
+back.line(to: NSPoint(x: 158, y: 709))
+back.curve(to: NSPoint(x: 203, y: 754), controlPoint1: NSPoint(x: 158, y: 739), controlPoint2: NSPoint(x: 178, y: 754))
+back.line(to: NSPoint(x: 405, y: 754))
+back.line(to: NSPoint(x: 489, y: 672))
+back.line(to: NSPoint(x: 828, y: 672))
+back.curve(to: NSPoint(x: 868, y: 632), controlPoint1: NSPoint(x: 855, y: 672), controlPoint2: NSPoint(x: 868, y: 655))
+back.line(to: NSPoint(x: 868, y: 326))
+back.close()
+NSColor(calibratedRed: 0.87, green: 0.63, blue: 0.13, alpha: 1).setFill()
+back.fill()
+NSColor(calibratedRed: 1, green: 0.90, blue: 0.62, alpha: 1).setFill()
+NSBezierPath(roundedRect: NSRect(x: 194, y: 375, width: 636, height: 224), xRadius: 10, yRadius: 10).fill()
+let front = NSBezierPath(roundedRect: NSRect(x: 158, y: 264, width: 710, height: 298), xRadius: 37, yRadius: 37)
+NSColor(calibratedRed: 1, green: 0.79, blue: 0.27, alpha: 1).setFill()
+front.fill()
+NSColor(calibratedRed: 0.20, green: 0.54, blue: 0.80, alpha: 1).setFill()
+NSBezierPath(roundedRect: NSRect(x: 412, y: 253, width: 205, height: 96), xRadius: 14, yRadius: 14).fill()
+NSColor(calibratedRed: 0.34, green: 0.66, blue: 0.89, alpha: 1).setFill()
+NSBezierPath(roundedRect: NSRect(x: 438, y: 290, width: 153, height: 20), xRadius: 5, yRadius: 5).fill()
+image.unlockFocus()
+let bitmap = NSBitmapImageRep(data: image.tiffRepresentation!)!
+try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: output))

@@ -1,0 +1,56 @@
+{
+  "name": "mac-explorer",
+  "version": "0.1.11",
+  "private": true,
+  "description": "A Windows 11-style file explorer for macOS",
+  "main": "dist-electron/main.cjs",
+  "scripts": {
+    "postinstall": "node node_modules/electron/install.js",
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc --noEmit && vite build && node scripts/build-electron.mjs",
+    "start": "npm run build && electron .",
+    "test": "node --import tsx --test tests/files.test.ts",
+    "test:compression": "npm run build && node scripts/compression-smoke.mjs",
+    "test:archive": "npm run build && node scripts/archive-smoke.mjs && node scripts/extraction-smoke.mjs",
+    "test:ui": "npm run build && node scripts/smoke.mjs",
+    "test:theme": "npm run build && node scripts/theme-smoke.mjs",
+    "test:view": "npm run build && node scripts/view-menu-smoke.mjs",
+    "test:icons": "npm run build && node scripts/icon-address-smoke.mjs",
+    "package": "node scripts/make-icon.mjs && npm run build && electron-builder --mac dir --arm64 && codesign --force --deep --sign - 'release/mac-arm64/Mac Explorer.app'"
+  },
+  "dependencies": {
+    "lucide-react": "^0.577.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^44.2.0",
+    "electron-builder": "^26.0.0",
+    "esbuild": "^0.25.0",
+    "playwright": "^1.58.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0"
+  },
+  "build": {
+    "appId": "local.macexplorer.desktop",
+    "productName": "Mac Explorer",
+    "directories": { "output": "release" },
+    "files": ["dist/**", "dist-electron/**", "package.json"],
+    "asarUnpack": ["dist-electron/native/**"],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "identity": null,
+      "icon": "build/icon.icns",
+      "extendInfo": {
+        "NSDesktopFolderUsageDescription": "浏览和管理桌面中的文件。",
+        "NSDocumentsFolderUsageDescription": "浏览和管理文稿中的文件。",
+        "NSDownloadsFolderUsageDescription": "浏览和管理下载中的文件。"
+      }
+    }
+  }
+}

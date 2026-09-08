@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-electron/
+release/
+artifacts/
+.DS_Store
+.env*
+!.env.example
+build/
+design/rendered/

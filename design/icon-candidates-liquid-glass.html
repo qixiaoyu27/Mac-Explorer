@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mac Explorer · Liquid Glass Icons</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 2000px; height: 1120px; overflow: hidden; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+      color: #142238;
+      background:
+        radial-gradient(circle at 92% 2%, #d8ecff 0 11%, transparent 28%),
+        radial-gradient(circle at 7% 100%, #fff0bd 0 13%, transparent 29%),
+        linear-gradient(145deg, #fbfcfe, #e9eef5);
+    }
+    header { padding: 66px 88px 0; }
+    h1 { margin: 0; font-size: 52px; letter-spacing: -1.8px; }
+    header p { margin: 18px 0 0; color: #62738a; font-size: 27px; font-weight: 560; }
+    main { display: grid; grid-template-columns: repeat(5, 1fr); gap: 22px; padding: 72px 64px 0; }
+    article {
+      height: 648px;
+      padding: 46px 28px 30px;
+      text-align: center;
+      border: 1px solid rgba(255,255,255,.88);
+      border-radius: 38px;
+      background: rgba(255,255,255,.7);
+      box-shadow: 0 24px 50px rgba(39,65,95,.12), inset 0 1px 0 #fff;
+    }
+    .icon {
+      position: relative;
+      width: 320px;
+      height: 320px;
+      margin: 0 auto;
+      overflow: hidden;
+      border-radius: 76px;
+      isolation: isolate;
+      box-shadow: 0 22px 32px rgba(24,48,73,.22), 0 5px 11px rgba(24,48,73,.12);
+    }
+    .icon::before {
+      content: "";
+      position: absolute;
+      inset: -18%;
+      background: var(--scene);
+      transform: scale(1.08);
+    }
+    .icon::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 5;
+      border-radius: inherit;
+      box-shadow:
+        inset 0 0 0 2px rgba(255,255,255,.58),
+        inset 10px 12px 22px rgba(255,255,255,.28),
+        inset -12px -16px 30px rgba(42,93,142,.16);
+      pointer-events: none;
+    }
+    .glass {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      border-radius: inherit;
+      background: var(--glass);
+      border: 1px solid rgba(255,255,255,.74);
+      -webkit-backdrop-filter: var(--hyalite, blur(8px) saturate(125%));
+      backdrop-filter: var(--hyalite, blur(8px) saturate(125%));
+    }
+    .rim {
+      position: absolute;
+      inset: 9px;
+      z-index: 2;
+      border-radius: 68px;
+      border: 2px solid transparent;
+      border-top-color: rgba(255,255,255,.88);
+      border-left-color: rgba(255,255,255,.55);
+      border-right-color: rgba(111,191,255,.35);
+      filter: drop-shadow(0 0 5px rgba(255,255,255,.58));
+    }
+    .mark {
+      position: absolute;
+      left: 42px;
+      right: 42px;
+      top: 73px;
+      height: 201px;
+      z-index: 4;
+      filter: drop-shadow(0 15px 14px rgba(45,54,57,.23));
+    }
+    .folder {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+    .one .mark { left: 24px; right: 24px; top: 15.1px; height: 272px; }
+    .one::before { transform: scale(-1.08, 1.08); }
+    .one {
+      --scene: radial-gradient(circle at 20% 18%, #ffbfd8 0 13%, transparent 31%), radial-gradient(circle at 85% 78%, #3bc4ff 0 20%, transparent 43%), linear-gradient(145deg, #f8fbff, #d7e4f2);
+      --glass: rgba(248,252,255,.19);
+    }
+    .two {
+      --scene: radial-gradient(circle at 75% 20%, #64e0ff 0 19%, transparent 43%), radial-gradient(circle at 22% 88%, #665cff 0 18%, transparent 44%), linear-gradient(145deg, #1b8ce4, #083d86);
+      --glass: rgba(208,239,255,.14);
+    }
+    .three {
+      --scene: radial-gradient(circle at 15% 75%, #ffd765 0 18%, transparent 43%), radial-gradient(circle at 84% 23%, #ff8bbf 0 17%, transparent 42%), linear-gradient(145deg, #9ad9ff, #ecd9ff);
+      --glass: rgba(255,255,255,.18);
+    }
+    .four {
+      --scene: radial-gradient(circle at 78% 72%, #45aaff 0 17%, transparent 42%), radial-gradient(circle at 20% 18%, #5a6476 0 17%, transparent 45%), linear-gradient(145deg, #252d3a, #0d121b);
+      --glass: rgba(255,255,255,.08);
+    }
+    .five {
+      --scene: radial-gradient(circle at 52% 45%, #ffffff 0 10%, transparent 31%), radial-gradient(circle at 80% 75%, #a8eaff 0 17%, transparent 44%), radial-gradient(circle at 16% 18%, #fff4ba 0 15%, transparent 41%), linear-gradient(145deg, #f8fbff, #cbd9e8);
+      --glass: rgba(255,255,255,.27);
+    }
+    .four .folder { filter: saturate(.97) brightness(1.03); }
+    .number { margin-top: 46px; color: #0673cd; font-size: 34px; font-weight: 800; }
+    h2 { margin: 18px 0 0; font-size: 26px; }
+    .desc { margin: 12px 0 0; color: #74859b; font-size: 19px; font-weight: 570; }
+    footer {
+      position: absolute;
+      left: 88px;
+      right: 88px;
+      bottom: 50px;
+      padding-top: 26px;
+      border-top: 1px solid #cbd6e2;
+      color: #718299;
+      font-size: 20px;
+      font-weight: 560;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Mac Explorer</h1>
+    <p>Windows 文件资源管理器标志结构 × macOS Liquid Glass</p>
+  </header>
+  <main>
+    <article>
+      <div class="icon one"><div class="glass"></div><div class="rim"></div><div class="mark"><img class="folder" src="source/microsoft-file-folder-color.svg"></div></div>
+      <div class="number">01</div><h2>清透玻璃</h2><p class="desc">最接近 macOS 默认图标</p>
+    </article>
+    <article>
+      <div class="icon two"><div class="glass"></div><div class="rim"></div><div class="mark"><img class="folder" src="source/microsoft-file-folder-color.svg"></div></div>
+      <div class="number">02</div><h2>深蓝折射</h2><p class="desc">品牌对比最强</p>
+    </article>
+    <article>
+      <div class="icon three"><div class="glass"></div><div class="rim"></div><div class="mark"><img class="folder" src="source/microsoft-file-folder-color.svg"></div></div>
+      <div class="number">03</div><h2>虹彩玻璃</h2><p class="desc">更活泼的系统感</p>
+    </article>
+    <article>
+      <div class="icon four"><div class="glass"></div><div class="rim"></div><div class="mark"><img class="folder" src="source/microsoft-file-folder-color.svg"></div></div>
+      <div class="number">04</div><h2>深色玻璃</h2><p class="desc">暗色桌面最醒目</p>
+    </article>
+    <article>
+      <div class="icon five"><div class="glass"></div><div class="rim"></div><div class="mark"><img class="folder" src="source/microsoft-file-folder-color.svg"></div></div>
+      <div class="number">05</div><h2>冰晶玻璃</h2><p class="desc">克制、明亮、通用</p>
+    </article>
+  </main>
+  <footer>概念稿 · 文件夹主体来自 Microsoft Fluent Emoji，底板使用 Hyalite 实时折射</footer>
+  <script src="source/hyalite.js"></script>
+  <script>
+    document.querySelectorAll('.glass').forEach((glass, index) => {
+      Hyalite.attach(glass, {
+        bevel: 28,
+        thickness: index === 1 || index === 3 ? 18 : 14,
+        blur: index === 4 ? 4 : 2,
+        dispersion: index === 2 ? 0.14 : 0.06,
+        rim: index === 3 ? 0.9 : 0.65,
+        light: -135,
+        smooth: 1
+      });
+    });
+    window.iconsReady = true;
+  </script>
+</body>
+</html>
