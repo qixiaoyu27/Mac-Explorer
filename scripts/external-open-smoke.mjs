@@ -10,6 +10,8 @@ const root = await fs.mkdtemp(path.join(os.tmpdir(), 'explorer-external-'));
 const docs = path.join(root, 'Documents');
 const folder = path.join(root, "中文 $(test) ' 文件夹");
 await fs.mkdir(docs); await fs.mkdir(folder);
+const preserved = path.join(docs, '保持原状.txt');
+await fs.writeFile(preserved, 'Keep this file');
 const file = path.join(folder, '说明.txt');
 const hidden = path.join(folder, '.隐藏.txt');
 const bundle = path.join(folder, '示例.app');
@@ -39,12 +41,14 @@ try {
   console.log('multi passed'); await emit([bundle]); await waitSelected('示例.app');
   await emit([docs]);
   await page.waitForFunction(() => document.querySelector('[role=tab][aria-selected=true]')?.textContent === '文档');
-  console.log('folder passed'); await page.keyboard.press('Control+Shift+n');
-  await page.getByLabel('名称', { exact: true }).waitFor();
+  console.log('folder passed');
+  await selected('保持原状.txt').click(); await page.keyboard.press('Delete');
+  await page.getByRole('dialog').waitFor();
   await emit([file]);
-  // The native request must not dismiss the user's unfinished inline rename.
+  // Use a confirmation dialog: inline rename intentionally saves on blur,
+  // and macOS activation can blur its input before the open request arrives.
   await page.waitForTimeout(200);
-  assert.equal(await page.getByLabel('名称', { exact: true }).count(), 1);
+  assert.equal(await page.getByRole('dialog').count(), 1);
   assert.equal(await page.getByRole('tab', { name: '文档', exact: true }).getAttribute('aria-selected'), 'true');
   await page.keyboard.press('Escape'); await waitSelected('说明.txt');
   await emit(['relative', '/bad\0path', path.join(root, 'missing'), hidden]); await waitSelected('.隐藏.txt');
@@ -64,8 +68,9 @@ try {
     await waitSelected('.隐藏.txt');
     console.log('Actual LaunchServices open -a delivery passed');
   }
+  assert.equal(await fs.readFile(preserved, 'utf8'), 'Keep this file');
   assert.equal(await fs.readFile(file, 'utf8'), 'External open fixture');
   assert.equal(await fs.readFile(hidden, 'utf8'), 'Hidden fixture');
   assert.deepEqual(errors, []);
-  console.log('External open: folder/file/package, hidden reveal, multi-file selection, tab reuse, rename deferral, invalid paths and pre-renderer queue passed');
+  console.log('External open: folder/file/package, hidden reveal, multi-file selection, tab reuse, confirmation-dialog deferral, invalid paths and pre-renderer queue passed');
 } catch (error) { console.error(error); if (!page.isClosed()) console.error(await page.locator('body').innerText()); throw error; } finally { await app.close(); await fs.rm(root, { recursive: true, force: true }); }
