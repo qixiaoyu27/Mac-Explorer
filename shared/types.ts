@@ -16,6 +16,8 @@ export type ExtractMode = 'choose' | 'here' | 'folder';
 export interface ArchivePreview { path: string; name: string; entries: { path: string; directory: boolean; size: number }[] }
 export interface ExplorerAPI {
   bootstrap(): Promise<Bootstrap>;
+  takeOpenPaths(): Promise<string[]>;
+  onOpenPaths(callback: () => void): () => void;
   setTheme(mode: ThemeMode): Promise<ThemeMode>;
   list(path: string): Promise<Listing>;
   search(path: string, query: string, hidden: boolean): Promise<SearchResult>;

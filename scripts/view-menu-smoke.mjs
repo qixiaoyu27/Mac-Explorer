@@ -13,7 +13,7 @@ await fs.writeFile(path.join(docs, '.hidden-test'), 'hidden');
 await fs.writeFile(path.join(docs, 'image.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=', 'base64'));
 for (let i = 0; i < 45; i++) await fs.writeFile(path.join(docs, `文件 ${String(i).padStart(2, '0')}.txt`), `Fixture ${i}`);
 await fs.mkdir('artifacts', { recursive: true });
-const app = await electron.launch({ ...(process.env.EXPLORER_APP_PATH ? { executablePath: process.env.EXPLORER_APP_PATH, args: [] } : { args: [process.cwd()] }), env: { ...process.env, EXPLORER_TEST_ROOT: root } });
+const app = await electron.launch({ ...(process.env.EXPLORER_APP_PATH ? { executablePath: process.env.EXPLORER_APP_PATH, args: [] } : { args: [process.cwd()] }), env: { ...process.env, EXPLORER_TEST_ROOT: root, EXPLORER_TEST_HIDDEN: '1' } });
 const page = await app.firstWindow();
 const errors = []; page.on('pageerror', error => errors.push(error.message));
 const viewButton = page.getByRole('button', { name: '查看', exact: true });
@@ -55,6 +55,22 @@ try {
   assert.ok(await page.locator('.file-row').first().evaluate(el => el.getBoundingClientRect().height) < rowHeight);
   await show('导航窗格'); assert.equal(await page.locator('.sidebar').count(), 0);
   await show('项目复选框');
+  for (const mode of ['大图标', '详细信息']) {
+    await choose(mode);
+    const row = page.getByRole('option', { name: '文件夹', exact: true });
+    const checkbox = row.getByRole('checkbox');
+    await viewButton.focus(); await page.mouse.move(5, 5);
+    assert.equal(await checkbox.evaluate(el => getComputedStyle(el).opacity), '0');
+    await row.hover();
+    assert.equal(await checkbox.evaluate(el => getComputedStyle(el).opacity), '1');
+    await checkbox.check(); await viewButton.focus(); await page.mouse.move(5, 5);
+    assert.equal(await checkbox.evaluate(el => getComputedStyle(el).opacity), '1');
+    await row.hover(); await checkbox.uncheck(); await viewButton.focus(); await page.mouse.move(5, 5);
+    assert.equal(await checkbox.evaluate(el => getComputedStyle(el).opacity), '0');
+    await page.keyboard.press('Tab'); await checkbox.focus();
+    assert.equal(await checkbox.evaluate(el => getComputedStyle(el).opacity), '1');
+  }
+  console.log('PASS: checkbox hover, selected persistence, leave/uncheck hiding and keyboard focus in icon/detail views');
   await page.getByRole('checkbox', { name: '选择 预览.txt', exact: true }).check();
   await page.getByRole('checkbox', { name: '选择 image.png', exact: true }).check();
   assert.equal(await page.locator('.file-row[aria-selected=true]').count(), 2);

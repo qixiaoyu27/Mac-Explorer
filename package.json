@@ -1,6 +1,6 @@
 {
   "name": "mac-explorer",
-  "version": "0.1.11",
+  "version": "0.1.13",
   "private": true,
   "description": "A Windows 11-style file explorer for macOS",
   "main": "dist-electron/main.cjs",
@@ -16,7 +16,9 @@
     "test:theme": "npm run build && node scripts/theme-smoke.mjs",
     "test:view": "npm run build && node scripts/view-menu-smoke.mjs",
     "test:icons": "npm run build && node scripts/icon-address-smoke.mjs",
-    "package": "node scripts/make-icon.mjs && npm run build && electron-builder --mac dir --arm64 && codesign --force --deep --sign - 'release/mac-arm64/Mac Explorer.app'"
+    "package": "node scripts/make-icon.mjs && npm run build && electron-builder --mac dir --arm64 && codesign --force --deep --sign - 'release/mac-arm64/Mac Explorer.app'",
+    "test:external": "npm run build && node scripts/external-open-smoke.mjs",
+    "package:release": "node scripts/make-icon.mjs && npm run build && node scripts/release.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.577.0",
@@ -39,9 +41,17 @@
   "build": {
     "appId": "local.macexplorer.desktop",
     "productName": "Mac Explorer",
-    "directories": { "output": "release" },
-    "files": ["dist/**", "dist-electron/**", "package.json"],
-    "asarUnpack": ["dist-electron/native/**"],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "dist-electron/native/**"
+    ],
     "mac": {
       "category": "public.app-category.utilities",
       "identity": null,
@@ -49,8 +59,29 @@
       "extendInfo": {
         "NSDesktopFolderUsageDescription": "浏览和管理桌面中的文件。",
         "NSDocumentsFolderUsageDescription": "浏览和管理文稿中的文件。",
-        "NSDownloadsFolderUsageDescription": "浏览和管理下载中的文件。"
-      }
+        "NSDownloadsFolderUsageDescription": "浏览和管理下载中的文件。",
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Files and Folders",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.data",
+              "public.folder",
+              "public.text",
+              "public.image",
+              "public.audio",
+              "public.movie",
+              "public.archive",
+              "com.adobe.pdf",
+              "com.apple.package"
+            ]
+          }
+        ]
+      },
+      "minimumSystemVersion": "13.0"
     }
-  }
+  },
+  "license": "GPL-3.0-only",
+  "author": "qixiaoyu27"
 }

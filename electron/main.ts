@@ -23,6 +23,18 @@ const isDev = process.env.EXPLORER_DEV === '1';
 const testRoot = process.env.EXPLORER_TEST_ROOT;
 if (testRoot) app.setPath('userData', path.join(testRoot, '.app-data'));
 app.setName('Mac Explorer');
+const openPaths: string[] = [];
+let readyForOpen = false;
+// LaunchServices can deliver documents before app.whenReady or the renderer exists.
+app.on('open-file', (event, input) => {
+  event.preventDefault();
+  try { openPaths.push(absolute(input)); } catch { return; }
+  if (!readyForOpen) return;
+  if (!window) createWindow();
+  if (window?.isMinimized()) window.restore();
+  window?.show(); window?.focus();
+  window?.webContents.send('open-paths');
+});
 
 function protect(input: string) {
   const value = absolute(input);
@@ -99,6 +111,7 @@ async function bootstrap(): Promise<Bootstrap> {
   return { theme: nativeTheme.themeSource, home, places, volumes, initialPath: testRoot ? path.join(testRoot, 'Documents') : process.env.EXPLORER_START_PATH };
 }
 ipc('bootstrap', bootstrap);
+ipc('take-open-paths', () => openPaths.splice(0));
 function isThemeMode(value: unknown): value is ThemeMode { return value === 'light' || value === 'dark' || value === 'system'; }
 ipc('set-theme', async (mode: unknown) => {
   if (!isThemeMode(mode)) throw new Error('无效的外观设置。');
@@ -302,6 +315,7 @@ app.whenReady().then(async () => {
     { label: '显示', submenu: [{ label: '刷新', click: action('refresh') }, { label: '显示隐藏的项目', click: action('hidden') }, { role: 'togglefullscreen', label: '进入全屏' }] },
     { label: '窗口', submenu: [{ role: 'minimize', label: '最小化' }, { role: 'zoom', label: '缩放' }, { role: 'front', label: '前置全部窗口' }] },
   ]));
+  readyForOpen = true;
   createWindow();
   app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
 });

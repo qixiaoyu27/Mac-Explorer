@@ -3,6 +3,8 @@ import type { ExplorerAPI } from '../shared/types';
 
 const api: ExplorerAPI = {
   bootstrap: () => ipcRenderer.invoke('bootstrap'),
+  takeOpenPaths: () => ipcRenderer.invoke('take-open-paths'),
+  onOpenPaths: callback => { const listener = () => callback(); ipcRenderer.on('open-paths', listener); return () => ipcRenderer.removeListener('open-paths', listener); },
   setTheme: mode => ipcRenderer.invoke('set-theme', mode),
   list: path => ipcRenderer.invoke('list', path),
   search: (path, query, hidden) => ipcRenderer.invoke('search', path, query, hidden),

@@ -1,90 +1,176 @@
-# Mac Explorer
+<div align="center">
+  <img src="design/icon-selected-mirrored.png" width="112" alt="Mac Explorer 图标">
+  <h1>Mac Explorer</h1>
+  <p><strong>换了 Mac，文件管理习惯不用换。</strong></p>
+  <p>A Windows-style file manager for macOS.</p>
+  <p>
+    <a href="https://github.com/qixiaoyu27/Mac-Explorer/releases/latest"><img src="https://img.shields.io/github/v/release/qixiaoyu27/Mac-Explorer?style=flat-square&color=0078D4" alt="最新版本"></a>
+    <img src="https://img.shields.io/badge/macOS-13%2B-333333?style=flat-square&logo=apple" alt="macOS 13 及以上">
+    <img src="https://img.shields.io/badge/Apple%20Silicon-arm64-333333?style=flat-square" alt="Apple Silicon arm64">
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/qixiaoyu27/Mac-Explorer?style=flat-square" alt="GPL-3.0 许可证"></a>
+  </p>
+  <p>
+    <a href="https://github.com/qixiaoyu27/Mac-Explorer/releases/latest"><strong>下载 Mac 版</strong></a> ·
+    <a href="#熟悉的操作真正的-mac-文件">功能</a> ·
+    <a href="#从源码运行">开发</a> ·
+    <a href="https://github.com/qixiaoyu27/Mac-Explorer/issues">反馈问题</a>
+  </p>
+</div>
 
-复刻自Windows Explorer，替代该死的访达。
+![Mac Explorer 浅色界面](docs/images/explorer-light.png)
 
-面向 Windows 用户的 macOS 文件管理器，以 Windows 11 文件资源管理器为外观和交互参照。界面直接读取本机文件，支持中文路径，使用 macOS 的权限、磁盘、默认应用和废纸篓。
+Mac Explorer 面向习惯 Windows 文件资源管理器的 Mac 用户：熟悉的标签页、路径栏、右键菜单和快捷键，加上压缩包浏览与选择解压，让日常文件操作按你习惯的方式完成。
 
-## 运行
+这是独立开发的 macOS 应用，直接管理本机文件，使用系统权限、默认应用和废纸篓。安装后与 Finder 共存，不接管系统默认文件管理器。
 
-需要 macOS、Node.js 22.12+。开发构建和打包需安装 Xcode Command Line Tools，用于编译原生高清图标服务。
+## 下载与安装
 
-```sh
-npm ci
-npm run dev
-```
+1. 前往 **[Releases](https://github.com/qixiaoyu27/Mac-Explorer/releases/latest)**，下载 `Mac-Explorer-版本号-mac-arm64.dmg`。
+2. 打开 DMG，将 **Mac Explorer** 拖入 **Applications**。
+3. 启动应用，按需允许访问桌面、文档或下载文件夹。
 
-```sh
-npm test          # 临时目录中的文件系统测试
-npm run test:compression # 右键压缩、ZIP 内容完整性与原文件保留
-npm run test:archive # 压缩包预览、选择解压与文件安全检查
-npm run test:ui   # 启动真实 Electron 窗口进行操作测试
-npm run test:theme # 三种外观、原生主题、重启保存与深色对比度
-npm run test:view # 查看菜单、八种布局、窗格及显示设置回归检查
-npm run test:icons # 图标尺寸、Retina 清晰度与单击路径编辑回归检查
-npm run package   # Apple Silicon .app，本地 ad-hoc 签名
-```
+| 平台 | 支持情况 |
+| --- | --- |
+| Apple Silicon（M 系列芯片） | 提供 DMG 安装包与 ZIP 便携包 |
+| 系统版本 | 构建目标为 macOS 13+；最低版本尚未在实机回归 |
+| Intel Mac / Windows / Linux | 暂未提供构建 |
 
-应用输出到 `release/mac-arm64/Mac Explorer.app`。双击启动，或复制到个人的 `~/Applications`。开发模式下修改界面会热更新；修改 Electron 主进程后需重新运行开发命令。
+正式发布包经过 **Developer ID 签名、Apple 公证与票据装订**；每次发布附带 `SHA256SUMS.txt`。从同一 Release 下载校验文件后，可运行 `shasum -a 256 -c SHA256SUMS.txt` 校验对应下载文件；只下载一个安装包时，另一个未下载文件会提示不存在。
 
-## 已实现
+## 熟悉的操作，真正的 Mac 文件
 
-- Windows 11 式标签栏、地址栏、命令栏、导航栏、右键菜单和状态栏。
-- “更多（…）→ 外观”可选浅色、深色或跟随系统；立即生效并在重启后保留。跟随系统响应 macOS 外观变化，仅影响本应用。
-- 多标签、前进/后退、上一级、可编辑路径、快速访问、可展开目录树、真实磁盘容量。
-- “查看”菜单按 Windows 11 排列：超大图标、大图标、中图标、小图标、列表、详细信息、平铺、内容；支持按名称/时间/类型/大小排序。
-- “查看 → 显示”提供导航窗格、紧凑视图、项目复选框、文件扩展名、隐藏的项目；复选框支持逐项多选和表头全选，设置自动保存。
-- 详细信息窗格与预览窗格互斥切换；工具栏右侧“预览”可直接开关，支持文本和图片，其他文件可调用系统快速查看。
-- 图标支持 32–128 像素调节：使用底部滑块、“查看”菜单的四档大小，或在文件区按住 Ctrl 滚动；大小会自动保存。文件类型图标由 macOS 原生高分辨率图像绘制，按 Retina 像素密度加载。
-- 地址栏空白处或当前文件夹名称单击即可输入路径；点击上级路径仍直接跳转。
-- 单选、Ctrl/Command 多选、Shift 范围选择、方向键导航、双击或 Enter 打开。
-- 新建文件夹/文本文档、列表内重命名、复制/剪切/粘贴、同目录副本命名、批量移到废纸篓。
-- 原生多文件剪贴板、文件地址复制、系统共享菜单、文件夹固定到快速访问。
-- 默认的桌面、下载、文档、图片、音乐、视频也可在侧栏或主页右键取消固定；选择会保存，之后可从原文件夹右键重新固定。
-- 右键文件夹、侧栏位置、主页快速访问或当前目录空白处，选择“在此处打开终端”，即可在对应目录启动 macOS 终端。
-- 右键文件选择“打开方式…”，可在系统选择窗口中指定任意 `.app`；支持多选文件，不改变系统默认打开方式。
-- 拖入文件或拖到文件夹进行复制；移动使用剪切和粘贴。
-- 选中文件或文件夹后，右键“压缩为 ZIP”；支持多选，单项按原名称、多项按“压缩文件.zip”命名，同名时自动加编号。压缩包生成在所选项目的共同父目录，保留目录结构和隐藏文件，不改动原文件。暂不支持链接或特殊文件；压缩失败不发布残缺包。
-- 双击压缩包先在应用内查看目录，支持进入子文件夹；Enter、右键“打开”和地址栏打开行为一致。使用 macOS 自带归档读取器，支持 ZIP、TAR 等可识别的归档；损坏、加密目录或不支持的格式显示错误。打开压缩包只列目录；双击包内文件或按 Enter 会将该文件提取到独立临时目录，用默认应用打开并保留原包的 macOS 隔离标记。临时副本在预览关闭后保留供外部编辑器使用，修改不写回压缩包，需要保留请另存。可勾选部分项目或全部解压；位置选项显示“指定路径”“当前路径”和去掉压缩扩展名后的实际文件夹名；右键提供对应快捷操作。保留包内目录结构，已有同名顶层项目（包括目录）整项跳过，不合并或覆盖。
-- 文件名递归搜索、文件夹变化自动刷新、文本和图片预览、Space 原生快速查看。
-- 本次会话内撤销新建、复制、移动和重命名；持久保存标签位置、视图设置和应用内最近使用记录。
+| 你熟悉的习惯 | Mac Explorer 的实现 |
+| --- | --- |
+| 多窗口来回切换 | 多标签浏览，保留标签位置，支持前进、后退和上一级 |
+| 在路径栏直接输入 | 单击当前路径即可编辑；面包屑可快速跳转上级目录 |
+| 按自己的方式看文件 | 八种视图、32–128 px 图标调节、Retina 图标、排序与紧凑视图 |
+| 勾选多个文件再操作 | 开启项目复选框后，悬停时显示，勾选后保持显示 |
+| 常用目录随手可达 | 快速访问固定与取消固定，默认目录也可取消 |
+| 右键完成日常任务 | 新建、重命名、复制、剪切、粘贴、ZIP 压缩、选择打开方式、打开终端 |
+| 不打开文件也能看内容 | 文本和图片预览、详细信息窗格、Space 调用 macOS 快速查看 |
+| 从其他应用跳到文件 | 接收系统“打开方式”请求：进入文件夹，或定位并选中文件 |
+
+### 压缩包：先看看，再解压
+
+把常用的 WinRAR 操作习惯带到 Mac：
+
+- **双击压缩包**：直接浏览目录，进入包内子文件夹。
+- **双击包内文件**：提取临时副本，交给默认应用打开。
+- **勾选部分或全部项目**：解压到指定路径、当前路径，或以压缩包实际名称创建的文件夹。
+- **右键压缩包**：直接解压到当前目录或同名文件夹。
+- **选中文件或文件夹右键**：压缩为 ZIP；多选可合并成一个包。
+
+解压保留目录结构；已有同名顶层项目会整项跳过，不合并、不覆盖。包内文件的临时副本修改后**不会写回压缩包**，请另存需要保留的内容。
+
+ZIP、TAR.GZ、7z 已通过测试；其他格式（包括 RAR）取决于 macOS 自带 libarchive。当前不支持密码、分卷包、归档内链接或特殊文件。
+
+### 浅色、深色，或跟随系统
+
+在 **更多（…）→ 外观** 中切换；在 **查看 → 显示** 中调整导航窗格、紧凑视图、复选框、文件扩展名和隐藏项目。设置会自动保存。
+
+<details>
+<summary>查看深色界面</summary>
+
+![Mac Explorer 深色界面](docs/images/explorer-dark.png)
+
+</details>
+
+*以上截图来自实际应用，使用演示文件，不包含个人数据。*
 
 ## 快捷键
 
-下表的 Ctrl 同时支持 Mac 的 Command。
+常用文件操作同时支持 **Ctrl** 和 **Command（⌘）**。Mac 上的 Alt 对应 Option；部分键盘的 F2、F5 需要配合 Fn。
 
 | 操作 | 快捷键 |
 | --- | --- |
 | 复制 / 剪切 / 粘贴 / 撤销 | Ctrl+C / X / V / Z |
-| 全选 | Ctrl+A |
-| 新建文件夹 | Ctrl+Shift+N |
-| 重命名 | F2 |
-| 移到废纸篓 | Delete 或 Command+Backspace |
+| 全选 / 新建文件夹 | Ctrl+A / Ctrl+Shift+N |
+| 重命名 / 移到废纸篓 | F2 / Delete 或 ⌘+Backspace |
 | 打开 / 快速查看 | Enter / Space |
-| 前进 / 后退 / 上一级 | Alt+→ / ← / ↑ |
-| 编辑地址 / 搜索 | Ctrl+L / Ctrl+F |
-| 刷新 | F5 或 Ctrl+R |
-| 新建 / 关闭标签页 | Ctrl+T / Ctrl+W |
-| 切换标签页 | Ctrl+Tab |
-| 属性窗格 | Alt+Enter 或 Command+I |
+| 编辑路径 / 搜索 | Ctrl+L / Ctrl+F |
+| 前进 / 后退 / 上一级 | Alt+→ / Alt+← / Alt+↑ |
+| 新建 / 关闭 / 切换标签页 | Ctrl+T / Ctrl+W / Ctrl+Tab |
+| 刷新 / 详细信息窗格 | F5 或 Ctrl+R / Alt+Enter 或 ⌘+I |
 
-部分 Mac 键盘的 F2/F5 需要同时按 Fn。macOS 上 Alt 对应 Option。
+## 与其他应用配合
 
-## 文件与权限
+安装后，可在支持 macOS 标准“打开方式”的应用中选择 Mac Explorer；不同应用可能会筛选显示的文件类型。也可以从终端打开：
 
-同名目标不会被覆盖；批量操作报告已完成和失败的项目。剪切成功后才清理剪贴板中的对应源路径。文件夹不能复制到自身或子目录，搜索不递归跟随符号链接。
+```sh
+open -a 'Mac Explorer' '/完整的文件或文件夹路径'
+```
 
-如果桌面、文档或下载目录提示无权限，在系统设置 → 隐私与安全性 → 文件与文件夹中允许 Mac Explorer 访问。应用不会自动修改权限或 Finder 设置。
+<details>
+<summary>在 Codex 中添加“Mac Explorer”打开方式</summary>
 
-删除由系统废纸篓接管，需从 macOS 废纸篓恢复；删除操作会清空应用内撤销历史。撤销复制/新建也使用废纸篓，检测到项目被替换或直接修改时拒绝自动移除。
+将 [PNG 图标](design/icon-selected-mirrored.png) 保存到固定位置，然后在 `~/.codex/config.toml` 中添加以下配置。将 `icon` 改为图标的实际绝对路径；应用路径也应与你的安装位置一致。
 
-## 当前边界
+```toml
+[desktop.custom_file_handlers.mac_explorer]
+label = "Mac Explorer"
+icon = "/完整路径/mac-explorer.png"
+command = "/usr/bin/open"
+args = ["-a", "/Applications/Mac Explorer.app"]
+input = "path"
+supports_ssh = false
+```
 
-这是独立实现的 Mac 应用，尚不能称为 Windows 11 资源管理器全功能、逐像素一致的复制品。系统窗口按钮和文件类型图标采用 macOS 提供的资源。没有实现 Windows Shell 扩展、OneDrive 服务、Windows 网络发现、压缩包内直接编辑并写回、分组视图、框选、列宽拖动、文件操作重做和批量重命名。
+重启 Codex 后生效。参见 [Codex 自定义文件处理器文档](https://learn.chatgpt.com/docs/config-file/config-advanced#add-custom-file-handlers)。
 
-搜索按名称执行，单次最多扫描 30,000 个项目、返回 1,000 个结果，达到上限会显示提示；应用包内部不递归。文本预览最多 16 KB，图片预览最多 12 MB。压缩包目录最多 10,000 项 / 4 MB 列表输出，读取上限 15 秒；解压内容最多 20 GB，单次上限 5 分钟。使用 macOS libarchive，ZIP、TAR.GZ、7z 已用临时归档验证；RAR 等格式依系统读取器支持。暂不支持密码、分卷包、链接或特殊文件；异常路径会拒绝处理。解压先写临时目录，再逐项发布，失败会清理临时内容。最近使用仅记录本应用打开的文件，不冒充系统历史。自动化测试截图使用临时测试文件，不是用户数据。
+</details>
 
-当前打包脚本面向 Apple Silicon（arm64），采用本地 ad-hoc 签名，未经 Developer ID 签名或公证，不是公共分发安装包。
+## 文件安全与当前边界
 
-## 结构
+- 同名目标不覆盖；批量操作分别报告成功项和失败项。删除进入 macOS 废纸篓。
+- 撤销支持本次应用会话中的新建、复制、移动和重命名；废纸篓恢复交给系统处理，删除会清空应用内撤销历史。
+- 访问权限由 macOS 管理。遇到权限提示，可到“系统设置 → 隐私与安全性 → 文件与文件夹”检查授权。
+- 搜索按文件名递归，最多扫描 30,000 项、返回 1,000 项；不递归跟随符号链接或进入应用包。
+- 文本预览上限 16 KB，图片 12 MB；归档目录上限 10,000 项，解压上限 20 GB / 5 分钟。
 
-`src/`：React 界面；`electron/`：原生桥接和文件操作；`shared/`：IPC 类型；`tests/`：文件系统测试；`scripts/`：构建与桌面测试；`build/`：应用图标；`artifacts/`：测试截图和结果。
+尚未实现 Windows Shell 扩展、OneDrive 集成、Windows 网络发现、分组、框选、列宽拖动、重做与批量重命名。项目仍在持续完善，不宣称 Windows 资源管理器的完整功能兼容。
+
+## 从源码运行
+
+需要 **macOS、Apple Silicon、Node.js 22.12+ 和 Xcode Command Line Tools**。原生图标服务使用 Swift，归档目录服务使用 C / libarchive。
+
+```sh
+git clone https://github.com/qixiaoyu27/Mac-Explorer.git
+cd Mac-Explorer
+npm ci
+npm run dev
+```
+
+| 命令 | 用途 |
+| --- | --- |
+| `npm run build` | TypeScript 检查、前端打包、原生组件编译 |
+| `npm test` | 临时目录中的文件系统回归测试 |
+| `npm run test:ui` | Electron 文件操作与键盘流程 |
+| `npm run test:view` / `npm run test:theme` | 视图、复选框、外观与设置保存 |
+| `npm run test:icons` | 图标分辨率、尺寸和路径编辑 |
+| `npm run test:archive` / `npm run test:compression` | 归档浏览、解压、压缩与文件保留 |
+| `npm run test:external` | 外部路径打开、文件定位与请求排队 |
+| `npm run package` | 本机体验包：ad-hoc 签名，未公证 |
+| `npm run package:release` | Developer ID 签名、公证、DMG / ZIP 与 SHA-256 校验文件 |
+
+正式打包需通过环境变量提供 `CSC_NAME`（签名身份名称）和 `APPLE_NOTARY_PROFILE`（已保存在钥匙串中的公证配置名）；自定义签名钥匙串可设置 `CSC_KEYCHAIN`。构建不会自动上传 GitHub，签名或公证失败会停止。请勿把证书、私钥或凭证提交到仓库。
+
+```text
+src/          React 界面、样式与主题
+electron/     文件操作、原生服务与隔离预加载桥接
+shared/       IPC 类型与归档格式规则
+tests/        文件系统测试
+scripts/      开发、构建、签名与桌面回归测试
+docs/images/  使用演示文件拍摄的应用截图
+```
+
+## 参与贡献
+
+欢迎通过 [Issues](https://github.com/qixiaoyu27/Mac-Explorer/issues) 提交问题或建议。报告问题时请附上应用版本、macOS 版本、复现步骤和脱敏截图；涉及文件操作时，尽量提供可复现的演示文件。
+
+提交 PR 前请阅读 [贡献指南](AGENTS.md) 和 [界面设计约定](DESIGN.md)，完成构建及相关测试。界面改动请附截图，文件操作测试请使用临时目录。
+
+## 许可证与致谢
+
+以 [GNU GPL v3](LICENSE) 开源。基于 Electron、React、Lucide 和 macOS 原生能力构建。
+
+外观与交互受 Windows 11 File Explorer 启发，归档流程参考 WinRAR 使用习惯。Mac Explorer 与 Microsoft、Apple、WinRAR 均无隶属或官方合作关系。

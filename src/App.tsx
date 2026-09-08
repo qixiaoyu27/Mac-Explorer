@@ -114,6 +114,36 @@ export default function App() {
   const contentRef = useRef<HTMLDivElement>(null);
   const generation = useRef(0);
   const loadedLocation = useRef('');
+  const [openPaths, setOpenPaths] = useState<string[]>([]);
+  const [revealedPaths, setRevealedPaths] = useState<string[]>([]);
+  const pendingSelection = useRef<{ directory: string; paths: string[] } | null>(null);
+
+  useEffect(() => {
+    const receive = () => api.takeOpenPaths().then(paths => { if (paths.length) setOpenPaths(previous => [...previous, ...paths]); }).catch(e => setToast(errorMessage(e)));
+    const unsubscribe = api.onOpenPaths(receive);
+    void receive();
+    return unsubscribe;
+  }, []);
+  useEffect(() => {
+    if (!boot || !openPaths.length || modal || operation || editingName) return;
+    let live = true;
+    Promise.all(openPaths.map(p => api.info(p).catch(e => { if (live) setToast(errorMessage(e)); return null; }))).then(results => {
+      if (!live) return;
+      const targets = results.filter((entry): entry is FileEntry => entry !== null);
+      setOpenPaths(previous => previous.slice(openPaths.length));
+      if (!targets.length) return;
+      const directoryFor = (entry: FileEntry) => entry.isDirectory && !entry.name.endsWith('.app') ? entry.path : parent(entry.path);
+      const directory = directoryFor(targets[targets.length - 1]);
+      const nextTabs = [...tabs];
+      for (const entry of targets) if (!nextTabs.some(t => t.location === directoryFor(entry))) nextTabs.push(makeTab(directoryFor(entry)));
+      resetNavigation();
+      const paths = targets.filter(e => directoryFor(e) === directory && e.path !== directory).map(e => e.path);
+      pendingSelection.current = { directory, paths };
+      setRevealedPaths(paths); setTabs(nextTabs); setActiveID(nextTabs.find(t => t.location === directory)!.id);
+      setRefresh(value => value + 1);
+    });
+    return () => { live = false; };
+  }, [boot, openPaths, modal, operation, editingName, tabs]);
 
   useEffect(() => { api.bootstrap().then(data => {
     setBoot(data); setTheme(data.theme);
@@ -140,7 +170,10 @@ export default function App() {
     };
     load().then(items => {
       if (version !== generation.current) return;
-      loadedLocation.current = location; setEntries(items); setSelected(previous => new Set([...previous].filter(p => items.some(e => e.path === p))));
+      loadedLocation.current = location; setEntries(items);
+      const reveal = pendingSelection.current?.directory === location ? pendingSelection.current : null;
+      if (reveal) pendingSelection.current = null;
+      setSelected(previous => new Set((reveal ? reveal.paths : [...previous]).filter(p => items.some(e => e.path === p))));
     }).catch(e => { if (version === generation.current) { setEntries([]); setError(errorMessage(e)); } }).finally(() => { if (version === generation.current) setLoading(false); });
     return () => { generation.current++; api.cancelSearch().catch(() => {}); };
   }, [boot, location, refresh, submittedQuery, hidden, recent]);
@@ -159,14 +192,17 @@ export default function App() {
   const label = useCallback((value: string) => value === HOME ? '主页' : value === PC ? '此电脑' : value === boot?.home ? '个人文件夹' : boot?.places.find(p => p.path === value)?.name || places.find(p => p.path === value)?.name || base(value), [boot, places]);
   const displayName = (entry: FileEntry) => extensions || entry.isDirectory || !entry.extension ? entry.name : entry.name.slice(0, -(entry.extension.length + 1));
   const visible = useMemo(() => {
-    const items = entries.filter(e => hidden || !e.hidden);
+    const items = entries.filter(e => hidden || !e.hidden || revealedPaths.includes(e.path));
     if (location === HOME && !submittedQuery) return items;
     return items.sort((a, b) => {
       if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
       const comparison = sort === 'name' ? a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }) : sort === 'modified' ? a.modified - b.modified : sort === 'size' ? a.size - b.size : type(a).localeCompare(type(b), 'zh-CN');
       return (ascending ? 1 : -1) * (comparison || a.name.localeCompare(b.name));
     });
-  }, [entries, hidden, location, submittedQuery, sort, ascending]);
+  }, [entries, hidden, revealedPaths, location, submittedQuery, sort, ascending]);
+  useEffect(() => {
+    if (!loading && revealedPaths.length) contentRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [loading, entries, revealedPaths]);
   const chosen = visible.filter(e => selected.has(e.path));
   const single = chosen.length === 1 ? chosen[0] : null;
   const writable = !isVirtual(location) && !submittedQuery;
@@ -178,7 +214,7 @@ export default function App() {
 
   function toggleDetails(value = !details) { setDetails(value); if (value) setPreviewPane(false); }
   function togglePreview() { setPreviewPane(!previewPane); if (!previewPane) setDetails(false); }
-  function resetNavigation() { setSelected(new Set()); selectionAnchor.current = null; setQuery(''); setSubmittedQuery(''); setEditingAddress(false); setEditingName(null); setPopup(null); }
+  function resetNavigation() { pendingSelection.current = null; setRevealedPaths([]); setSelected(new Set()); selectionAnchor.current = null; setQuery(''); setSubmittedQuery(''); setEditingAddress(false); setEditingName(null); setPopup(null); }
   function navigate(destination: string) {
     resetNavigation();
     setTabs(previous => previous.map(t => t.id === tab.id ? { ...t, location: destination, history: [...t.history.slice(0, t.index + 1), destination], index: t.index + 1 } : t));
