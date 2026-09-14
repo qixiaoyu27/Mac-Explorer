@@ -17,7 +17,7 @@
   </p>
 </div>
 
-![Mac Explorer 浅色界面](docs/images/explorer-light.png)
+![Mac Explorer 浅色界面](docs/images/explorer-light-0.1.19.png)
 
 Mac Explorer 面向习惯 Windows 文件资源管理器的 Mac 用户：熟悉的标签页、路径栏、右键菜单和快捷键，加上压缩包浏览与选择解压，让日常文件操作按你习惯的方式完成。
 
@@ -104,11 +104,11 @@ ZIP、TAR.GZ、7z 已通过测试；其他格式（包括 RAR）取决于 macOS 
 <details>
 <summary>查看深色界面</summary>
 
-![Mac Explorer 深色界面](docs/images/explorer-dark.png)
+![Mac Explorer 深色界面](docs/images/explorer-dark-0.1.19.png)
 
 </details>
 
-*以上截图来自实际应用，使用演示文件，不包含个人数据。*
+*以上截图来自 v0.1.19 实际应用，使用临时演示目录，不包含个人数据。*
 
 启动应用和新建标签页默认进入个人文件夹。侧栏保留快速访问固定项；启动时保留其他目录标签页，并选中个人文件夹。
 
