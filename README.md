@@ -17,7 +17,7 @@
   </p>
 </div>
 
-![Mac Explorer 浅色界面](docs/images/explorer-light-0.1.19.png)
+![Mac Explorer 浅色界面](docs/images/explorer-light-0.1.21.png)
 
 Mac Explorer 面向习惯 Windows 文件资源管理器的 Mac 用户：熟悉的标签页、路径栏、右键菜单和快捷键，加上压缩包浏览与选择解压，让日常文件操作按你习惯的方式完成。
 
@@ -63,7 +63,7 @@ xattr -dr com.apple.quarantine "/Applications/Mac Explorer.app"
 每次发布附带 `SHA256SUMS.txt`。在下载目录运行以下命令，并将输出与同一 Release 中的校验文件对照：
 
 ```sh
-shasum -a 256 Mac-Explorer-0.1.19-mac-arm64.dmg
+shasum -a 256 Mac-Explorer-0.1.21-mac-arm64.dmg
 ```
 
 使用 ZIP 时，对 ZIP 文件执行相同校验即可。
@@ -75,7 +75,7 @@ shasum -a 256 Mac-Explorer-0.1.19-mac-arm64.dmg
 | 多窗口来回切换 | 多标签浏览，保留标签位置，支持前进、后退和上一级 |
 | 在路径栏直接输入 | 单击当前路径即可编辑；面包屑可快速跳转上级目录 |
 | 按自己的方式看文件 | 八种视图、32–128 px 图标调节、Retina 图标、排序与紧凑视图 |
-| 勾选多个文件再操作 | 开启项目复选框后，悬停时显示，勾选后保持显示 |
+| 一次选择多个文件 | 空白处拖动框选，支持边缘滚动；⌘/Ctrl 增减选择、Shift 追加、Esc 取消。项目复选框悬停时显示，勾选后保持显示 |
 | 常用目录随手可达 | 快速访问固定与取消固定，默认目录也可取消 |
 | 右键完成日常任务 | 新建、重命名、复制、剪切、粘贴、ZIP 压缩、选择打开方式、使用文本编辑、打开终端 |
 | 不打开文件也能看内容 | 文本和图片预览、详细信息窗格、Space 调用 macOS 快速查看 |
@@ -104,11 +104,11 @@ ZIP、TAR.GZ、7z 已通过测试；其他格式（包括 RAR）取决于 macOS 
 <details>
 <summary>查看深色界面</summary>
 
-![Mac Explorer 深色界面](docs/images/explorer-dark-0.1.19.png)
+![Mac Explorer 深色界面](docs/images/explorer-dark-0.1.21.png)
 
 </details>
 
-*以上截图来自 v0.1.19 实际应用，使用临时演示目录，不包含个人数据。*
+*以上截图来自 v0.1.21 实际应用，使用临时演示目录，不包含个人数据。*
 
 启动应用和新建标签页默认进入个人文件夹。侧栏保留快速访问固定项；启动时保留其他目录标签页，并选中个人文件夹。
 

@@ -71,9 +71,6 @@ svg { flex-shrink: 0; }
 .nav-divider { height: 1px; min-height: 1px; margin: 10px 12px; background: var(--border, #e8e8e8); }
 .nav-chevron { position: absolute; left: 5px; color: var(--text-secondary, #646464); }
 .drive-nav { padding-left: 38px; gap: 12px; }
-.sidebar-bottom { margin-top: auto; padding-top: 24px; }
-.sidebar-bottom .nav-item { padding-left: 15px; color: var(--text-secondary, #616161); gap: 10px; }
-.sidebar-bottom .nav-item > svg:last-child { margin-left: auto; }
 .place-icon { color: #3d759b; }
 .icon-home { color: #2679be; fill: #2679be15; }
 .icon-star { color: #bc8b0b; fill: #e5b844; }
@@ -87,7 +84,7 @@ svg { flex-shrink: 0; }
 .icon-drive { color: #737f88; }
 .icon-computer { color: #50778f; }
 .main-pane { display: flex; flex: 1; flex-direction: column; min-width: 0; background: var(--surface, #fff); }
-.file-content { overflow: auto; flex: 1; min-height: 0; outline: none !important; }
+.file-content { position: relative; overflow: auto; flex: 1; min-height: 0; outline: none !important; }
 .file-content:focus-visible .file-row.selected { outline: 1px solid #a3cbed; outline-offset: -1px; }
 .file-table { width: 100%; padding: 0 14px 20px; }
 .table-heading, .file-row { display: grid; grid-template-columns: minmax(200px, 1fr) 165px 132px 100px; align-items: center; }
@@ -367,3 +364,6 @@ h2 { font-weight: 500; }
 
 .archive-actions select { max-width: min(320px, 40vw); text-overflow: ellipsis; }
 .archive-actions label { display: flex; align-items: center; gap: 6px; }
+
+.selection-marquee { position: absolute; pointer-events: none; z-index: 5; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.marquee-selecting .icon-grid:not(.small-icons) .file-row.selected .entry-name { -webkit-line-clamp: 2; }

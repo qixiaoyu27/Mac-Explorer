@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import {
   Archive, ArrowLeft, ArrowRight, ArrowUp, ArrowDownWideNarrow, Check, ChevronDown, ChevronRight,
   ClipboardPaste, Copy, Download, ExternalLink, FilePlus2, FileText, Film, FolderOpen,
@@ -74,6 +74,9 @@ export default function App() {
   const location = tab.location;
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectionBox, setSelectionBox] = useState<CSSProperties | null>(null);
+  const cancelMarquee = useRef<(() => void) | null>(null);
+  const suppressMarqueeClick = useRef(false);
   const selectionAnchor = useRef<string | null>(null);
   const [view, setView] = useState<View>(() => stored('view', 'details'));
   const [iconSize, setIconSize] = useState(() => { const value = stored<number>('iconSize', 64); return typeof value === 'number' && Number.isFinite(value) ? Math.min(128, Math.max(32, Math.round(value / 8) * 8)) : 64; });
@@ -310,6 +313,77 @@ export default function App() {
   function chooseFolder() { run('选择文件夹…', async () => { const path = await api.chooseFolder(); if (path) navigate(path); }); }
   function terminalItem(directory: string): MenuItem {
     return { label: '在此处打开终端', icon: <Terminal/>, disabled: isVirtual(directory), action: () => run('正在打开终端…', () => api.openTerminal(directory)) };
+  }
+  useEffect(() => () => cancelMarquee.current?.(), [location, view, loading]);
+  function startMarquee(event: ReactPointerEvent<HTMLDivElement>) {
+    suppressMarqueeClick.current = false;
+    const area = event.currentTarget;
+    const bounds = area.getBoundingClientRect();
+    if (event.button !== 0 || !event.isPrimary || loading || modal || editingName ||
+      (event.target as Element).closest('.file-row, .table-heading, button, input') ||
+      event.clientX >= bounds.left + area.clientWidth || event.clientY >= bounds.top + area.clientHeight ||
+      (location === PC && !submittedQuery)) return;
+    event.preventDefault(); area.focus({ preventScroll: true }); setPopup(null);
+    const original = new Set(selected);
+    const originalAnchor = selectionAnchor.current;
+    const toggle = event.metaKey || event.ctrlKey;
+    const additive = toggle || event.shiftKey;
+    const start = { x: event.clientX - bounds.left + area.scrollLeft, y: event.clientY - bounds.top + area.scrollTop };
+    let pointer = { x: event.clientX, y: event.clientY };
+    let dragged = false; let frame = 0; let finished = false;
+    // Keep label expansion from moving the hit targets while the rectangle changes.
+    area.classList.add('marquee-selecting');
+    const rows = [...area.querySelectorAll<HTMLElement>('.file-row')].map(row => {
+      const rect = row.getBoundingClientRect();
+      return { path: row.dataset.path!, left: rect.left - bounds.left + area.scrollLeft, top: rect.top - bounds.top + area.scrollTop, width: rect.width, height: rect.height };
+    });
+    if (!additive) { setSelected(new Set()); selectionAnchor.current = null; }
+    area.setPointerCapture(event.pointerId);
+    function update() {
+      if (finished || !dragged) return;
+      const rect = area.getBoundingClientRect();
+      const x = Math.max(0, Math.min(area.clientWidth, pointer.x - rect.left));
+      const y = Math.max(0, Math.min(area.clientHeight, pointer.y - rect.top));
+      const speed = (position: number, limit: number) => position < 24 ? -12 : position > limit - 24 ? 12 : 0;
+      area.scrollLeft += speed(x, area.clientWidth); area.scrollTop += speed(y, area.clientHeight);
+      const endX = x + area.scrollLeft; const endY = y + area.scrollTop;
+      const left = Math.min(start.x, endX); const top = Math.min(start.y, endY);
+      const right = Math.max(start.x, endX); const bottom = Math.max(start.y, endY);
+      setSelectionBox({ left, top, width: right - left, height: bottom - top });
+      const next = new Set(additive ? original : []);
+      for (const row of rows) {
+        if (row.left < right && row.left + row.width > left && row.top < bottom && row.top + row.height > top) {
+          if (toggle && original.has(row.path)) next.delete(row.path); else next.add(row.path);
+        }
+      }
+      setSelected(previous => previous.size === next.size && [...previous].every(p => next.has(p)) ? previous : next);
+      frame = requestAnimationFrame(update);
+    }
+    function move(e: PointerEvent) {
+      if (e.pointerId !== event.pointerId) return;
+      pointer = { x: e.clientX, y: e.clientY };
+      if (!dragged && Math.hypot(e.clientX - event.clientX, e.clientY - event.clientY) >= 4) {
+        dragged = true; suppressMarqueeClick.current = true; update();
+      }
+    }
+    function finish(cancelled = false) {
+      if (finished) return;
+      finished = true; cancelAnimationFrame(frame);
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel); window.removeEventListener('blur', abort);
+      window.removeEventListener('keydown', escape, true);
+      if (area.hasPointerCapture(event.pointerId)) area.releasePointerCapture(event.pointerId);
+      area.classList.remove('marquee-selecting'); setSelectionBox(null); cancelMarquee.current = null;
+      if (cancelled) { setSelected(original); selectionAnchor.current = originalAnchor; }
+    }
+    function up(e: PointerEvent) { if (e.pointerId === event.pointerId) { cancelAnimationFrame(frame); update(); finish(); } }
+    function abort() { finish(true); }
+    function cancel(e: PointerEvent) { if (e.pointerId === event.pointerId) abort(); }
+    function escape(e: KeyboardEvent) { if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); abort(); } }
+    cancelMarquee.current = () => finish();
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel); window.addEventListener('blur', abort);
+    window.addEventListener('keydown', escape, true);
   }
   function select(entry: FileEntry, event: MouseEvent) {
     setPopup(null); contentRef.current?.focus();
@@ -611,16 +685,17 @@ export default function App() {
         <div className="nav-divider"/>
         <button className={`nav-item parent-nav ${location === PC ? 'current' : ''}`} onClick={() => navigate(PC)}><ChevronDown className="nav-chevron" size={12}/><PlaceIcon icon="computer"/><span>此电脑</span></button>
         {boot?.volumes.map(volume => <NavigationTree key={volume.path} place={volume} location={location} hidden={hidden} navigate={navigate} newTab={newTab} drop={drop} level={1} context={(event, target) => menuAt(event, [{ label: '在新标签页中打开', icon: <Plus/>, action: () => newTab(target.path) }, terminalItem(target.path)])}/>)}
-        <div className="sidebar-bottom"><button className="nav-item" onClick={chooseFolder}><FolderOpen size={17}/><span>打开文件夹</span><Plus size={13}/></button></div>
       </nav>}
 
       <main className={`main-pane ${details || previewPane ? 'has-details' : ''}`}>
         {error && <div className="error-bar" role="alert"><Info size={17}/><span>{error}</span><button title="关闭提示" aria-label="关闭错误提示" onClick={() => setError('')}><X size={15}/></button></div>}
         {submittedQuery && <div className="search-summary"><Search size={16}/><span>“{submittedQuery}” 的搜索结果</span><small>{loading ? '正在搜索子文件夹…' : searchNote || `${visible.length} 个匹配项目`}</small><button onClick={() => { setQuery(''); setSubmittedQuery(''); }}>退出搜索</button></div>}
         <div ref={contentRef} tabIndex={0} className={`file-content view-${view} ${dragOver === location ? 'drop-target' : ''}`} aria-label={label(location)} aria-busy={loading}
-          onContextMenu={event => contextMenu(event)} onClick={event => { if (event.target === event.currentTarget) { setSelected(new Set()); setPopup(null); } }}
+          onPointerDown={startMarquee} onClickCapture={event => { if (suppressMarqueeClick.current) { event.preventDefault(); event.stopPropagation(); suppressMarqueeClick.current = false; } }}
+          onContextMenu={event => contextMenu(event)}
           onDragOver={event => { if (writable) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDragOver(location); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragOver(null); }} onDrop={event => drop(event, location)}>
           {location === PC && !submittedQuery ? <div className="computer-content"><h2><ChevronDown size={14}/>设备和驱动器（{boot?.volumes.length || 0}）</h2><div className="drive-grid">{boot?.volumes.map(volume => <button className="drive-card" key={volume.path} onDoubleClick={() => navigate(volume.path)} onKeyDown={event => { if (event.key === 'Enter') navigate(volume.path); }}><HardDrive size={49} strokeWidth={1.2}/><span><strong>{volume.name}</strong><span className="storage-track"><span style={{ width: `${Math.max(0, Math.min(100, (1 - volume.free / volume.total) * 100))}%` }}/></span><small>{size(volume.free)} 可用，共 {size(volume.total)}</small></span></button>)}</div></div> : loading ? <Loading/> : visible.length ? fileRows() : <div className="empty-state">{submittedQuery ? <Search size={42} strokeWidth={1.2}/> : <FolderGlyph dimension={68}/>}<h2>{error ? '无法显示此位置' : submittedQuery ? '没有找到匹配的项目' : '此文件夹为空'}</h2><p>{error ? '检查访问权限，或返回上一个文件夹。' : submittedQuery ? '尝试其他名称，或到上一级文件夹中搜索。' : '将文件拖到这里，或使用“新建”创建文件夹。'}</p>{error && <button className="secondary-button" onClick={() => setRefresh(v => v + 1)}>重试</button>}</div>}
+          {selectionBox && <div className="selection-marquee" style={selectionBox} aria-hidden="true"/>}
         </div>
       </main>
       {details && <aside className="details-pane" aria-label="详细信息"><div className="details-header"><h2>详细信息</h2><button aria-label="关闭详细信息" onClick={() => setDetails(false)}><X size={17}/></button></div>
