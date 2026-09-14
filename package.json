@@ -1,6 +1,6 @@
 {
   "name": "mac-explorer",
-  "version": "0.1.14",
+  "version": "0.1.19",
   "private": true,
   "description": "A Windows 11-style file explorer for macOS",
   "main": "dist-electron/main.cjs",
@@ -18,7 +18,10 @@
     "test:icons": "npm run build && node scripts/icon-address-smoke.mjs",
     "package": "node scripts/make-icon.mjs && npm run build && electron-builder --mac dir --arm64 && codesign --force --deep --sign - 'release/mac-arm64/Mac Explorer.app'",
     "test:external": "npm run build && node scripts/external-open-smoke.mjs",
-    "package:release": "node scripts/make-icon.mjs && npm run build && node scripts/release.mjs"
+    "package:release": "node scripts/make-icon.mjs && npm run build && node scripts/release.mjs",
+    "test:text-edit": "npm run build && node scripts/text-edit-smoke.mjs",
+    "test:shortcuts": "npm run build && node scripts/finder-shortcuts-smoke.mjs",
+    "test:startup": "npm run build && node scripts/startup-smoke.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.577.0",

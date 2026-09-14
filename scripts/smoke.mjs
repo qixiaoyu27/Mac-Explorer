@@ -112,15 +112,15 @@ try {
   console.log('PASS: context menu file action');
 
   await page.keyboard.press('Control+t');
-  await page.locator('.home-content').waitFor();
+  await page.locator('.file-content[aria-label="个人文件夹"] .file-items').waitFor();
   assert.equal(await page.getByRole('tab').count(), 2);
-  await page.screenshot({ path: path.join(artifactPath, 'home-test-fixture.png') });
+  await page.screenshot({ path: path.join(artifactPath, 'personal-folder-test-fixture.png') });
   await page.keyboard.press('Control+w');
   assert.equal(await page.getByRole('tab').count(), 1);
   await page.getByRole('option', { name: '会议记录.md', exact: true }).waitFor();
   console.log('PASS: new/close tabs preserve the prior location');
   await page.keyboard.press('Meta+t');
-  await page.locator('.home-content').waitFor();
+  await page.locator('.file-content[aria-label="个人文件夹"] .file-items').waitFor();
   await page.keyboard.press('Meta+w');
   await page.getByRole('option', { name: '会议记录.md', exact: true }).waitFor();
   assert.equal(await page.getByRole('tab').count(), 1);
@@ -139,11 +139,11 @@ try {
   console.log('PASS: address navigation and live external filesystem changes');
 
   await page.getByRole('option', { name: '外部新增.txt', exact: true }).click();
-  await page.keyboard.press('Delete');
+  await page.keyboard.press('Meta+Backspace');
   await page.getByRole('button', { name: '移到废纸篓', exact: true }).click();
   await page.getByText('此文件夹为空', { exact: true }).waitFor();
   await assert.rejects(fs.access(dropped));
-  console.log('PASS: Delete moves a temporary test file to native Trash');
+  console.log('PASS: Command+Delete moves a temporary test file to native Trash');
 
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(820, 600));
   await page.screenshot({ path: path.join(artifactPath, 'compact-test-fixture.png') });

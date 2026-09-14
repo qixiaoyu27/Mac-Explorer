@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import {
   Archive, ArrowLeft, ArrowRight, ArrowUp, ArrowDownWideNarrow, Check, ChevronDown, ChevronRight,
   ClipboardPaste, Copy, Download, ExternalLink, FilePlus2, FileText, Film, FolderOpen,
-  FolderPlus, HardDrive, Home, Image, Info, Keyboard, LayoutGrid, List, Loader2,
+  FolderPlus, HardDrive, Image, Info, Keyboard, LayoutGrid, List, Loader2,
   PanelLeft, Eye, FileType, SquareCheck, ChevronsDownUp,
   Monitor, MoreHorizontal, Music2, PanelRight, Pin, Plus, RotateCw, Scissors,
   Search, Share2, Star, Sun, Moon, SunMoon, Terminal, TextCursorInput, Trash2, Undo2, X,
@@ -12,19 +12,19 @@ import { archiveFolderName, isArchive } from '../shared/archives';
 import type { ExtractMode, ArchivePreview, Bootstrap, ClipboardInfo, FileEntry, OperationResult, Place, Preview, ThemeMode } from '../shared/types';
 
 const api = window.explorer;
-const HOME = 'home'; const PC = 'computer';
+const PC = 'computer';
 type Tab = { id: string; location: string; history: string[]; index: number };
 type SortKey = 'name' | 'modified' | 'type' | 'size';
 type View = 'details' | 'icons' | 'list' | 'tiles' | 'content';
 type MenuItem = { children?: MenuItem[]; radio?: boolean; label: string; icon?: ReactNode; action?: () => void; shortcut?: string; checked?: boolean; disabled?: boolean; danger?: boolean; divider?: boolean };
 type Popup = { x: number; y: number; items: MenuItem[]; quickActions?: MenuItem[] };
 type Modal = { kind: 'archive'; archive: ArchivePreview } | { kind: 'folder' | 'file' | 'rename'; path: string; name: string } | { kind: 'trash'; paths: string[] } | { kind: 'shortcuts' };
-const makeTab = (location = HOME): Tab => ({ id: crypto.randomUUID(), location, history: [location], index: 0 });
+const makeTab = (location = ''): Tab => ({ id: crypto.randomUUID(), location, history: [location], index: 0 });
 function stored<T,>(key: string, fallback: T): T { try { return JSON.parse(localStorage.getItem(key) || 'null') ?? fallback; } catch { return fallback; } }
 function base(path: string) { return path.split('/').filter(Boolean).at(-1) || 'Macintosh HD'; }
 function parent(path: string) { return path.slice(0, path.lastIndexOf('/')) || '/'; }
 function join(path: string, name: string) { return `${path === '/' ? '' : path}/${name}`; }
-function isVirtual(location: string) { return location === HOME || location === PC; }
+function isVirtual(location: string) { return !location || location === PC; }
 function size(bytes: number) { return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: bytes >= 1e9 ? 1 : 0 }).format(bytes / (bytes >= 1024 ** 3 ? 1024 ** 3 : bytes >= 1024 ** 2 ? 1024 ** 2 : bytes >= 1024 ? 1024 : 1)) + ' ' + (bytes >= 1024 ** 3 ? 'GB' : bytes >= 1024 ** 2 ? 'MB' : bytes >= 1024 ? 'KB' : '字节'); }
 function date(value: number) { return new Date(value).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }); }
 function type(entry: FileEntry) {
@@ -35,7 +35,7 @@ function type(entry: FileEntry) {
 function errorMessage(error: unknown) { return String(error instanceof Error ? error.message : error).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
 
 function PlaceIcon({ icon, size: dimension = 18 }: { icon: string; size?: number }) {
-  const Component = ({ home: Home, star: Star, desktop: Monitor, download: Download, document: FileText, image: Image, music: Music2, video: Film, drive: HardDrive, folder: FolderOpen, computer: Monitor } as Record<string, typeof Home>)[icon] || FolderOpen;
+  const Component = ({ star: Star, desktop: Monitor, download: Download, document: FileText, image: Image, music: Music2, video: Film, drive: HardDrive, folder: FolderOpen, computer: Monitor } as Record<string, typeof FolderOpen>)[icon] || FolderOpen;
   return <Component size={dimension} strokeWidth={1.6} className={`place-icon icon-${icon}`} aria-hidden="true" />;
 }
 function ViewGlyph({ mode }: { mode: 'extra' | 'large' | 'medium' | 'small' | 'list' | 'details' | 'tiles' | 'content' }) {
@@ -147,8 +147,9 @@ export default function App() {
 
   useEffect(() => { api.bootstrap().then(data => {
     setBoot(data); setTheme(data.theme);
-    const saved = stored<string[]>('tabs', [HOME]).filter(p => typeof p === 'string' && (isVirtual(p) || p.startsWith('/'))).slice(0, 12);
-    const initial = (data.initialPath ? [data.initialPath] : saved.length ? saved : [HOME]).map(makeTab);
+    const saved = stored<unknown>('tabs', []);
+    const folders = Array.isArray(saved) ? saved.filter((p): p is string => typeof p === 'string' && (p === PC || p.startsWith('/'))) : [];
+    const initial = (data.initialPath ? [data.initialPath] : [...new Set([data.home, ...folders])].slice(0, 12)).map(makeTab);
     setTabs(initial); setActiveID(initial[0].id);
   }).catch(e => { setError(errorMessage(e)); setLoading(false); }); }, []);
   useEffect(() => { for (const [key, value] of Object.entries({ view, iconSize, sort, ascending, hidden, extensions, details, previewPane, navigationPane, compact, checkboxes, pins, unpinnedDefaults, recent })) localStorage.setItem(key, JSON.stringify(value)); }, [view, iconSize, sort, ascending, hidden, extensions, details, previewPane, navigationPane, compact, checkboxes, pins, unpinnedDefaults, recent]);
@@ -165,7 +166,6 @@ export default function App() {
         return result.entries;
       }
       if (location === PC) return [];
-      if (location === HOME) return (await Promise.all(recent.slice(0, 16).map(p => api.info(p).catch(() => null)))).filter((e): e is FileEntry => e !== null);
       return (await api.list(location)).entries;
     };
     load().then(items => {
@@ -176,7 +176,7 @@ export default function App() {
       setSelected(previous => new Set((reveal ? reveal.paths : [...previous]).filter(p => items.some(e => e.path === p))));
     }).catch(e => { if (version === generation.current) { setEntries([]); setError(errorMessage(e)); } }).finally(() => { if (version === generation.current) setLoading(false); });
     return () => { generation.current++; api.cancelSearch().catch(() => {}); };
-  }, [boot, location, refresh, submittedQuery, hidden, recent]);
+  }, [boot, location, refresh, submittedQuery, hidden]);
   useEffect(() => {
     if (!boot) return;
     api.watch(isVirtual(location) || submittedQuery ? null : location).catch(() => {});
@@ -189,11 +189,10 @@ export default function App() {
   }, []);
 
   const places = useMemo<Place[]>(() => [...(boot?.places || []).filter(place => !unpinnedDefaults.includes(place.path)), ...pins.filter(p => !boot?.places.some(place => place.path === p)).map(p => ({ path: p, name: base(p), icon: 'folder' }))], [boot, pins, unpinnedDefaults]);
-  const label = useCallback((value: string) => value === HOME ? '主页' : value === PC ? '此电脑' : value === boot?.home ? '个人文件夹' : boot?.places.find(p => p.path === value)?.name || places.find(p => p.path === value)?.name || base(value), [boot, places]);
+  const label = useCallback((value: string) => value === PC ? '此电脑' : !value || value === boot?.home ? '个人文件夹' : boot?.places.find(p => p.path === value)?.name || places.find(p => p.path === value)?.name || base(value), [boot, places]);
   const displayName = (entry: FileEntry) => extensions || entry.isDirectory || !entry.extension ? entry.name : entry.name.slice(0, -(entry.extension.length + 1));
   const visible = useMemo(() => {
     const items = entries.filter(e => hidden || !e.hidden || revealedPaths.includes(e.path));
-    if (location === HOME && !submittedQuery) return items;
     return items.sort((a, b) => {
       if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
       const comparison = sort === 'name' ? a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }) : sort === 'modified' ? a.modified - b.modified : sort === 'size' ? a.size - b.size : type(a).localeCompare(type(b), 'zh-CN');
@@ -224,9 +223,9 @@ export default function App() {
     if (index < 0 || index >= tab.history.length) return;
     resetNavigation(); setTabs(previous => previous.map(t => t.id === tab.id ? { ...t, index, location: t.history[index] } : t));
   }
-  function newTab(destination = HOME) { const next = makeTab(destination); setTabs(previous => [...previous, next]); setActiveID(next.id); resetNavigation(); }
+  function newTab(destination = boot?.home || '') { const next = makeTab(destination); setTabs(previous => [...previous, next]); setActiveID(next.id); resetNavigation(); }
   function closeTab(id: string) {
-    if (tabs.length === 1) { navigate(HOME); return; }
+    if (tabs.length === 1) { navigate(boot?.home || ''); return; }
     const index = tabs.findIndex(t => t.id === id);
     if (id === tab.id) { setActiveID(tabs[index === 0 ? 1 : index - 1].id); resetNavigation(); }
     setTabs(previous => previous.filter(t => t.id !== id));
@@ -256,7 +255,7 @@ export default function App() {
     if (!paths.length) return;
     run(cut ? '正在剪切…' : '正在复制…', async () => { setClipboard(await api.clipboardSet(paths, cut)); }, `已${cut ? '剪切' : '复制'} ${paths.length} 个项目，请到目标文件夹粘贴`);
   }
-  function paste() { if (writable) run('正在粘贴…', async () => { report(await api.paste(location), '已粘贴'); setClipboard(await api.clipboardGet()); }); }
+  function paste(move = false) { if (writable) run('正在粘贴…', async () => { report(await api.paste(location, move), move ? '已移动' : '已粘贴'); setClipboard(await api.clipboardGet()); }); }
   function undo() { if (undoLabel) run('正在撤销…', async () => report(await api.undo(), '已撤销')); }
   function showModal(next: Modal) { setPopup(null); setModalError(''); setModal(next); setModalValue('name' in next ? next.name : ''); }
   function create(directory: boolean) {
@@ -333,6 +332,8 @@ export default function App() {
       { label: '打开', icon: <FolderOpen/>, action: () => openEntry(entry) },
       ...(!entry.isDirectory ? [{ label: '打开方式…', icon: <ExternalLink/>, disabled: paths.some(p => visible.find(item => item.path === p)?.isDirectory), action: () => run('选择打开方式…', async () => {
         if (await api.openWith(paths)) setRecent(previous => [...paths, ...previous.filter(p => !paths.includes(p))].slice(0, 30));
+      }) }, { label: '使用文本编辑', icon: <FileText/>, disabled: paths.some(p => visible.find(item => item.path === p)?.isDirectory), action: () => run('正在使用文本编辑打开…', async () => {
+        if (await api.openWith(paths, 'textedit')) setRecent(previous => [...paths, ...previous.filter(p => !paths.includes(p))].slice(0, 30));
       }) }] : []),
       ...(!entry.isDirectory && isArchive(entry.path) ? ([['choose', '解压到…'], ['here', '解压到当前目录'], ['folder', `解压到“${archiveFolderName(entry.name)}/”`]] as const).map(([mode, label]) => ({ label, icon: <Download/>, disabled: paths.length !== 1, action: () => run('正在解压…', async () => {
         const result = await api.extractArchive(entry.path, null, mode); if (result) report(result, '已解压');
@@ -345,18 +346,19 @@ export default function App() {
         setSelected(new Set([output])); setToast(`已创建 ${base(output)}`);
       }) },
       { label: '剪切', icon: <Scissors/>, shortcut: 'Ctrl+X', divider: true, action: () => copy(true, paths) },
-      { label: '复制', icon: <Copy/>, shortcut: 'Ctrl+C', action: () => copy(false, paths) },
+      { label: '复制', icon: <Copy/>, shortcut: '⌘C', action: () => copy(false, paths) },
       { label: '复制文件地址', icon: <Copy/>, action: () => run('复制地址…', () => api.copyText(paths.join('\n')), '已复制文件地址') },
-      { label: '重命名', icon: <TextCursorInput/>, shortcut: 'F2', disabled: paths.length !== 1, action: () => rename(target) },
-      { label: '移到废纸篓', icon: <Trash2/>, shortcut: 'Delete', danger: true, action: () => trash(paths) },
+      { label: '重命名', icon: <TextCursorInput/>, shortcut: 'Return', disabled: paths.length !== 1, action: () => rename(target) },
+      { label: '移到废纸篓', icon: <Trash2/>, shortcut: '⌘⌫', danger: true, action: () => trash(paths) },
       ...(entry.isDirectory ? [{ label: places.some(place => place.path === entry.path) ? '从快速访问取消固定' : '固定到快速访问', icon: <Pin/>, divider: true, action: () => togglePin(entry.path) }] : []),
       { label: '在访达中显示', icon: <ExternalLink/>, divider: true, action: () => run('正在显示…', () => api.reveal(entry.path)) },
-      { label: '属性', icon: <Info/>, shortcut: 'Alt+Enter', action: () => toggleDetails(true) },
+      { label: '属性', icon: <Info/>, shortcut: '⌘I', action: () => toggleDetails(true) },
     ] : [
       { label: '新建文件夹', icon: <FolderPlus/>, disabled: !writable, action: () => create(true) },
       { label: '新建文本文档', icon: <FilePlus2/>, disabled: !writable, action: () => create(false) },
-      { label: '粘贴', icon: <ClipboardPaste/>, shortcut: 'Ctrl+V', divider: true, disabled: !writable || !clipboard.paths.length, action: paste },
-      { label: undoLabel ? `撤销${undoLabel}` : '撤销', icon: <Undo2/>, shortcut: 'Ctrl+Z', disabled: !undoLabel, action: undo },
+      { label: '粘贴', icon: <ClipboardPaste/>, shortcut: '⌘V', divider: true, disabled: !writable || !clipboard.paths.length, action: () => paste() },
+      { label: '将项目移到这里', shortcut: '⌥⌘V', disabled: !writable || !clipboard.paths.length, action: () => paste(true) },
+      { label: undoLabel ? `撤销${undoLabel}` : '撤销', icon: <Undo2/>, shortcut: '⌘Z', disabled: !undoLabel, action: undo },
       { label: '刷新', icon: <RotateCw/>, shortcut: 'F5', action: () => setRefresh(v => v + 1) },
       { label: '显示隐藏的项目', checked: hidden, divider: true, action: () => setHidden(v => !v) },
       { label: '打开文件夹…', icon: <FolderOpen/>, action: chooseFolder },
@@ -417,20 +419,52 @@ export default function App() {
     if (modal) return;
     if (document.activeElement instanceof HTMLInputElement) {
       const command = ({ copy: 'copy', cut: 'cut', paste: 'paste', 'select-all': 'selectAll', undo: 'undo' } as Record<string, string>)[action];
-      if (command) { document.execCommand(command); return; }
+      if (command) document.execCommand(command);
+      return;
     }
     if (action === 'new-tab') newTab(); if (action === 'choose-folder') chooseFolder();
     if (action === 'new-folder') create(true); if (action === 'refresh') setRefresh(v => v + 1);
     if (action === 'hidden') setHidden(v => !v);
-    if (action === 'close-tab') closeTab(tab.id); if (action === 'copy') copy(false); if (action === 'cut') copy(true);
-    if (action === 'paste') paste(); if (action === 'undo') undo(); if (action === 'select-all') setSelected(new Set(visible.map(e => e.path)));
+    if (action === 'close-tab') closeTab(tab.id); if (action === 'copy') copy(false);
+    if (action === 'paste') paste(); if (action === 'move-here') paste(true); if (action === 'undo') undo(); if (action === 'select-all') setSelected(new Set(visible.map(e => e.path)));
   };
   useEffect(() => api.onAction(action => actions.current(action)), []);
   useEffect(() => {
     const keydown = (event: globalThis.KeyboardEvent) => {
       const input = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
-      const ctrl = event.ctrlKey || event.metaKey; const key = event.key.toLowerCase();
-      if (modal || popup) return;
+      const ctrl = event.ctrlKey; const key = event.key.toLowerCase();
+      if (event.defaultPrevented || event.isComposing || modal || popup) return;
+      if (event.metaKey) {
+        if (input) return;
+        let command: (() => void) | undefined;
+        if (!event.ctrlKey && !event.altKey && event.shiftKey) {
+          command = ({
+            g: () => { setAddress(isVirtual(location) ? boot?.home || '/' : location); setEditingAddress(true); },
+            n: () => create(true), p: togglePreview, '.': () => setHidden(v => !v),
+            c: () => navigate(PC), h: () => boot && navigate(boot.home),
+            d: () => boot && navigate(join(boot.home, 'Desktop')),
+            o: () => boot && navigate(join(boot.home, 'Documents')),
+          } as Record<string, () => void>)[key];
+        } else if (!event.ctrlKey && event.altKey && !event.shiftKey) {
+          command = ({ v: () => paste(true), l: () => boot && navigate(join(boot.home, 'Downloads')), s: () => setNavigationPane(v => !v) } as Record<string, () => void>)[key];
+        } else if (!event.ctrlKey && !event.altKey && !event.shiftKey) {
+          command = ({
+            c: () => copy(false), v: () => paste(), z: undo,
+            a: () => setSelected(new Set(visible.map(e => e.path))),
+            t: () => newTab(), w: () => closeTab(tab.id),
+            f: () => { searchRef.current?.focus(); searchRef.current?.select(); },
+            o: () => single && openEntry(single), arrowdown: () => single && openEntry(single),
+            arrowup: () => { if (!isVirtual(location) && location !== '/') navigate(parent(location)); },
+            '[': () => historyGo(-1), ']': () => historyGo(1),
+            backspace: () => trash(), delete: () => trash(), i: () => toggleDetails(),
+            y: () => single && run('正在预览…', () => api.quickLook(single.path)),
+            '1': () => { setView('icons'); if (iconSize === 32) setIconSize(64); }, '2': () => setView('details'),
+            d: () => { if (writable && selected.size) run('正在创建副本…', async () => report(await api.copyTo([...selected], location), '已创建副本')); },
+          } as Record<string, () => void>)[key];
+        }
+        if (command) { event.preventDefault(); command(); }
+        return;
+      }
       if (ctrl && key === 'l' || event.altKey && key === 'd') { event.preventDefault(); setAddress(isVirtual(location) ? boot?.home || '/' : location); setEditingAddress(true); return; }
       if (ctrl && (key === 'f' || key === 'e')) { event.preventDefault(); searchRef.current?.focus(); searchRef.current?.select(); return; }
       if (input) return;
@@ -446,11 +480,10 @@ export default function App() {
       else if (ctrl && key === 'tab') { event.preventDefault(); const index = tabs.findIndex(t => t.id === tab.id); setActiveID(tabs[(index + (event.shiftKey ? tabs.length - 1 : 1)) % tabs.length].id); resetNavigation(); }
       else if (key === 'f2') { event.preventDefault(); rename(); }
       else if (key === 'f5' || ctrl && key === 'r') { event.preventDefault(); setRefresh(v => v + 1); }
-      else if (key === 'delete' || event.metaKey && key === 'backspace') { event.preventDefault(); trash(); }
       else if (event.altKey && key === 'arrowleft') { event.preventDefault(); historyGo(-1); }
       else if (event.altKey && key === 'arrowright') { event.preventDefault(); historyGo(1); }
-      else if (key === 'backspace' || event.altKey && key === 'arrowup') { event.preventDefault(); if (!isVirtual(location) && location !== '/') navigate(parent(location)); }
-      else if (key === 'enter' && single) { event.preventDefault(); openEntry(single); }
+      else if (event.altKey && key === 'arrowup') { event.preventDefault(); if (!isVirtual(location) && location !== '/') navigate(parent(location)); }
+      else if (key === 'enter' && !event.altKey && !ctrl && single) { event.preventDefault(); rename(); }
       else if (key === ' ' && single) { event.preventDefault(); run('正在预览…', () => api.quickLook(single.path)); }
       else if (key === 'escape') { setSelected(new Set()); setSubmittedQuery(''); setQuery(''); }
       else if (['arrowdown', 'arrowup', 'home', 'end'].includes(key) && visible.length) {
@@ -516,14 +549,14 @@ export default function App() {
           <button className="tab-close" aria-label={`关闭 ${label(t.location)} 标签页`} onClick={() => closeTab(t.id)}><X size={13}/></button>
         </div>)}
       </div>
-      <ToolButton label="新建标签页 (Ctrl+T)" className="new-tab" onClick={() => newTab()}><Plus size={17}/></ToolButton>
+      <ToolButton label="新建标签页 (⌘T)" className="new-tab" onClick={() => newTab()}><Plus size={17}/></ToolButton>
     </header>
 
     <div className="navigation-bar">
       <div className="history-controls">
-        <ToolButton label="后退 (Alt+←)" disabled={tab.index === 0} onClick={() => historyGo(-1)}><ArrowLeft/></ToolButton>
-        <ToolButton label="前进 (Alt+→)" disabled={tab.index >= tab.history.length - 1} onClick={() => historyGo(1)}><ArrowRight/></ToolButton>
-        <ToolButton label="向上一级 (Alt+↑)" disabled={isVirtual(location) || location === '/'} onClick={() => navigate(parent(location))}><ArrowUp/></ToolButton>
+        <ToolButton label="后退 (⌘[)" disabled={tab.index === 0} onClick={() => historyGo(-1)}><ArrowLeft/></ToolButton>
+        <ToolButton label="前进 (⌘])" disabled={tab.index >= tab.history.length - 1} onClick={() => historyGo(1)}><ArrowRight/></ToolButton>
+        <ToolButton label="向上一级 (⌘↑)" disabled={isVirtual(location) || location === '/'} onClick={() => navigate(parent(location))}><ArrowUp/></ToolButton>
         <ToolButton label="刷新 (F5)" onClick={() => setRefresh(v => v + 1)}><RotateCw className={loading ? 'spinning' : ''}/></ToolButton>
       </div>
       <div className={`address-bar ${editingAddress ? 'editing' : ''}`} onClick={editAddress}>
@@ -531,7 +564,7 @@ export default function App() {
         {editingAddress ? <form onSubmit={event => { event.preventDefault(); goAddress(); }}><input ref={addressRef} aria-label="文件夹地址" value={address} onChange={event => setAddress(event.target.value)} onBlur={() => setEditingAddress(false)} onKeyDown={event => { if (event.key === 'Escape') setEditingAddress(false); }}/></form> : <div className="breadcrumbs">
           {isVirtual(location) ? <button onClick={editAddress}>{label(location)}</button> : breadcrumbs.map(crumb => <span key={crumb.path}><ChevronRight size={13}/><button title={crumb.path === location ? '单击编辑路径' : crumb.path} onClick={event => { if (crumb.path !== location) { event.stopPropagation(); navigate(crumb.path); } }}>{crumb.name}</button></span>)}
         </div>}
-        <ToolButton label="编辑地址 (Ctrl+L)" onClick={() => { setAddress(isVirtual(location) ? boot?.home || '/' : location); setEditingAddress(true); }}><ChevronDown size={14}/></ToolButton>
+        <ToolButton label="编辑地址 (⇧⌘G)" onClick={() => { setAddress(isVirtual(location) ? boot?.home || '/' : location); setEditingAddress(true); }}><ChevronDown size={14}/></ToolButton>
       </div>
       <form className="search-box" onSubmit={event => { event.preventDefault(); setSubmittedQuery(query.trim()); setSelected(new Set()); }}>
         <input ref={searchRef} aria-label="搜索文件" placeholder={`在${label(location)}中搜索`} value={query} onChange={event => { setQuery(event.target.value); if (!event.target.value) setSubmittedQuery(''); }}/>
@@ -540,23 +573,22 @@ export default function App() {
     </div>
 
     <div className="command-bar">
-      <ToolButton label="新建" disabled={!writable || !!operation} className="text-tool" onClick={event => buttonMenu(event, [{ label: '文件夹', icon: <FolderPlus/>, shortcut: 'Ctrl+Shift+N', action: () => create(true) }, { label: '文本文档', icon: <FilePlus2/>, action: () => create(false) }])}><Plus className="new-icon"/><span>新建</span><ChevronDown size={12}/></ToolButton>
+      <ToolButton label="新建" disabled={!writable || !!operation} className="text-tool" onClick={event => buttonMenu(event, [{ label: '文件夹', icon: <FolderPlus/>, shortcut: '⇧⌘N', action: () => create(true) }, { label: '文本文档', icon: <FilePlus2/>, action: () => create(false) }])}><Plus className="new-icon"/><span>新建</span><ChevronDown size={12}/></ToolButton>
       <span className="toolbar-separator"/>
       <ToolButton label="剪切 (Ctrl+X)" disabled={!selected.size || !!operation} onClick={() => copy(true)}><Scissors className="scissors-icon"/></ToolButton>
-      <ToolButton label="复制 (Ctrl+C)" disabled={!selected.size || !!operation} onClick={() => copy(false)}><Copy className="copy-icon"/></ToolButton>
-      <ToolButton label="粘贴 (Ctrl+V)" disabled={!writable || !clipboard.paths.length || !!operation} onClick={paste}><ClipboardPaste/></ToolButton>
-      <ToolButton label="重命名 (F2)" disabled={!single || !!operation} onClick={() => rename()}><TextCursorInput className="rename-icon"/></ToolButton>
+      <ToolButton label="复制 (⌘C)" disabled={!selected.size || !!operation} onClick={() => copy(false)}><Copy className="copy-icon"/></ToolButton>
+      <ToolButton label="粘贴 (⌘V)" disabled={!writable || !clipboard.paths.length || !!operation} onClick={() => paste()}><ClipboardPaste/></ToolButton>
+      <ToolButton label="重命名 (Return)" disabled={!single || !!operation} onClick={() => rename()}><TextCursorInput className="rename-icon"/></ToolButton>
       <ToolButton label="共享" disabled={!selected.size} onClick={() => run('共享文件…', () => api.share([...selected]))}><Share2/></ToolButton>
-      <ToolButton label="移到废纸篓 (Delete)" disabled={!selected.size || !!operation} onClick={() => trash()}><Trash2/></ToolButton>
+      <ToolButton label="移到废纸篓 (⌘⌫)" disabled={!selected.size || !!operation} onClick={() => trash()}><Trash2/></ToolButton>
       <span className="toolbar-separator"/>
       <ToolButton label="排序" className="text-tool" onClick={event => buttonMenu(event, sortMenu)}><ArrowDownWideNarrow/><span>排序</span><ChevronDown size={12}/></ToolButton>
       <ToolButton label="查看" className="text-tool" onClick={event => buttonMenu(event, viewMenu)}><List/><span>查看</span><ChevronDown size={12}/></ToolButton>
       <ToolButton label="更多" onClick={event => buttonMenu(event, [
         { label: '打开文件夹…', icon: <FolderOpen/>, action: chooseFolder },
-        { label: '全选', shortcut: 'Ctrl+A', action: () => setSelected(new Set(visible.map(e => e.path))) },
+        { label: '全选', shortcut: '⌘A', action: () => setSelected(new Set(visible.map(e => e.path))) },
         { label: '取消选择', action: () => setSelected(new Set()) },
-        { label: undoLabel ? `撤销${undoLabel}` : '撤销', icon: <Undo2/>, shortcut: 'Ctrl+Z', disabled: !undoLabel, divider: true, action: undo },
-        { label: '清空最近使用记录', disabled: !recent.length, divider: true, action: () => setRecent([]) },
+        { label: undoLabel ? `撤销${undoLabel}` : '撤销', icon: <Undo2/>, shortcut: '⌘Z', disabled: !undoLabel, divider: true, action: undo },
         { label: '外观', icon: <SunMoon/>, divider: true, children: [
           ...([{ mode: 'light', label: '浅色', icon: <Sun/> }, { mode: 'dark', label: '深色', icon: <Moon/> }, { mode: 'system', label: '跟随系统', icon: <Monitor/> }] as const).map(option => ({ label: option.label, icon: option.icon, radio: true, checked: theme === option.mode, action: () => run('正在切换外观…', async () => setTheme(await api.setTheme(option.mode))) })),
         ] },
@@ -569,7 +601,6 @@ export default function App() {
     <div className="workspace">
       {navigationPane && <nav className="sidebar" aria-label="文件位置">
         <div className="sidebar-top">
-          <button className={`nav-item ${location === HOME ? 'current' : ''}`} onClick={() => navigate(HOME)}><PlaceIcon icon="home"/><span>主页</span></button>
           <button className={`nav-item ${location === boot?.home ? 'current' : ''}`} onClick={() => boot && navigate(boot.home)}><PlaceIcon icon="folder"/><span>个人文件夹</span></button>
         </div>
         <div className="nav-divider"/>
@@ -589,13 +620,7 @@ export default function App() {
         <div ref={contentRef} tabIndex={0} className={`file-content view-${view} ${dragOver === location ? 'drop-target' : ''}`} aria-label={label(location)} aria-busy={loading}
           onContextMenu={event => contextMenu(event)} onClick={event => { if (event.target === event.currentTarget) { setSelected(new Set()); setPopup(null); } }}
           onDragOver={event => { if (writable) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDragOver(location); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragOver(null); }} onDrop={event => drop(event, location)}>
-          {location === HOME && !submittedQuery ? <div className="home-content">
-            <h1><Home size={23} strokeWidth={1.6}/>主页</h1>
-            <h2><ChevronDown size={14}/>快速访问</h2>
-            <div className="quick-access">{places.map(place => <button key={place.path} onDoubleClick={() => navigate(place.path)} onKeyDown={event => { if (event.key === 'Enter') navigate(place.path); }} className="quick-folder" onContextMenu={event => menuAt(event, [{ label: '在新标签页中打开', icon: <Plus/>, action: () => newTab(place.path) }, terminalItem(place.path), { label: '从快速访问取消固定', icon: <Pin/>, action: () => togglePin(place.path) }])}><FolderGlyph dimension={59} badge={place.icon}/><span><strong>{place.name}</strong><small>{pins.includes(place.path) ? '已固定的文件夹' : '本地文件夹'}</small></span><Pin size={13}/></button>)}</div>
-            <h2 className="recent-heading"><ChevronDown size={14}/>最近使用{recent.length > 0 && <button onClick={() => setRecent([])}>清除记录</button>}</h2>
-            {loading ? <Loading/> : visible.length ? fileRows() : <div className="recent-empty"><FileText size={29} strokeWidth={1.3}/><div>最近打开的文件会显示在这里<p>打开一个文件，即可在主页快速找到它。</p></div></div>}
-          </div> : location === PC && !submittedQuery ? <div className="computer-content"><h2><ChevronDown size={14}/>设备和驱动器（{boot?.volumes.length || 0}）</h2><div className="drive-grid">{boot?.volumes.map(volume => <button className="drive-card" key={volume.path} onDoubleClick={() => navigate(volume.path)} onKeyDown={event => { if (event.key === 'Enter') navigate(volume.path); }}><HardDrive size={49} strokeWidth={1.2}/><span><strong>{volume.name}</strong><span className="storage-track"><span style={{ width: `${Math.max(0, Math.min(100, (1 - volume.free / volume.total) * 100))}%` }}/></span><small>{size(volume.free)} 可用，共 {size(volume.total)}</small></span></button>)}</div></div> : loading ? <Loading/> : visible.length ? fileRows() : <div className="empty-state">{submittedQuery ? <Search size={42} strokeWidth={1.2}/> : <FolderGlyph dimension={68}/>}<h2>{error ? '无法显示此位置' : submittedQuery ? '没有找到匹配的项目' : '此文件夹为空'}</h2><p>{error ? '检查访问权限，或返回上一个文件夹。' : submittedQuery ? '尝试其他名称，或到上一级文件夹中搜索。' : '将文件拖到这里，或使用“新建”创建文件夹。'}</p>{error && <button className="secondary-button" onClick={() => setRefresh(v => v + 1)}>重试</button>}</div>}
+          {location === PC && !submittedQuery ? <div className="computer-content"><h2><ChevronDown size={14}/>设备和驱动器（{boot?.volumes.length || 0}）</h2><div className="drive-grid">{boot?.volumes.map(volume => <button className="drive-card" key={volume.path} onDoubleClick={() => navigate(volume.path)} onKeyDown={event => { if (event.key === 'Enter') navigate(volume.path); }}><HardDrive size={49} strokeWidth={1.2}/><span><strong>{volume.name}</strong><span className="storage-track"><span style={{ width: `${Math.max(0, Math.min(100, (1 - volume.free / volume.total) * 100))}%` }}/></span><small>{size(volume.free)} 可用，共 {size(volume.total)}</small></span></button>)}</div></div> : loading ? <Loading/> : visible.length ? fileRows() : <div className="empty-state">{submittedQuery ? <Search size={42} strokeWidth={1.2}/> : <FolderGlyph dimension={68}/>}<h2>{error ? '无法显示此位置' : submittedQuery ? '没有找到匹配的项目' : '此文件夹为空'}</h2><p>{error ? '检查访问权限，或返回上一个文件夹。' : submittedQuery ? '尝试其他名称，或到上一级文件夹中搜索。' : '将文件拖到这里，或使用“新建”创建文件夹。'}</p>{error && <button className="secondary-button" onClick={() => setRefresh(v => v + 1)}>重试</button>}</div>}
         </div>
       </main>
       {details && <aside className="details-pane" aria-label="详细信息"><div className="details-header"><h2>详细信息</h2><button aria-label="关闭详细信息" onClick={() => setDetails(false)}><X size={17}/></button></div>
@@ -766,7 +791,7 @@ function ModalDialog({ modal, value, onChange, error, busy, onClose, onSubmit }:
   const title = modal.kind === 'trash' ? '移到废纸篓' : modal.kind === 'rename' ? '重命名' : modal.kind === 'folder' ? '新建文件夹' : modal.kind === 'file' ? '新建文本文档' : '键盘快捷键';
   return <dialog ref={dialogRef} className={`modal ${modal.kind === 'shortcuts' ? 'shortcut-modal' : ''}`} aria-labelledby="modal-title" onCancel={event => { event.preventDefault(); onClose(); }} onClose={onClose}>
     <form onSubmit={event => { event.preventDefault(); onSubmit(); }}><div className="modal-heading"><h2 id="modal-title">{title}</h2><button type="button" aria-label="关闭对话框" onClick={onClose} disabled={busy}><X size={18}/></button></div>
-      {modal.kind === 'shortcuts' ? <><p className="shortcut-note">Ctrl 快捷键也可以使用 Mac 的 ⌘ Command。</p><div className="shortcut-list">{[['复制 / 剪切 / 粘贴', 'Ctrl+C / X / V'], ['全选', 'Ctrl+A'], ['新建文件夹', 'Ctrl+Shift+N'], ['重命名', 'F2'], ['移到废纸篓', 'Delete / ⌘⌫'], ['打开项目', 'Enter'], ['快速查看', 'Space'], ['后退 / 前进 / 上一级', 'Alt+← / → / ↑'], ['编辑地址', 'Ctrl+L / Alt+D'], ['搜索', 'Ctrl+F'], ['刷新', 'F5'], ['新建 / 关闭标签页', 'Ctrl+T / W'], ['切换标签页', 'Ctrl+Tab'], ['属性窗格', 'Alt+Enter / ⌘I']].map(([name, keys]) => <div key={name}><span>{name}</span><kbd>{keys}</kbd></div>)}</div><p className="shortcut-note">F2 / F5 在部分 Mac 键盘上需要同时按住 Fn。拖放文件默认复制，移动请使用剪切和粘贴。</p></> : modal.kind === 'trash' ? <div className="trash-description"><Trash2 size={34} strokeWidth={1.4}/><div><p>将{modal.paths.length === 1 ? `“${base(modal.paths[0])}”` : `这 ${modal.paths.length} 个项目`}移到废纸篓？</p><small>文件将移入 macOS 废纸篓，你可以从那里恢复。</small></div></div> : <><label className="name-label" htmlFor="entry-name">名称</label><input ref={inputRef} id="entry-name" value={value} onChange={event => onChange(event.target.value)} disabled={busy} autoComplete="off"/><p className="modal-location">位置：{modal.kind === 'rename' ? parent(modal.path) : modal.path}</p></>}
+      {modal.kind === 'shortcuts' ? <><p className="shortcut-note">文件操作遵循 macOS 访达的常用快捷键。</p><div className="shortcut-list">{[['重命名', 'Return'], ['打开项目', '⌘O / ⌘↓'], ['复制 / 粘贴 / 撤销', '⌘C / ⌘V / ⌘Z'], ['移动已复制的文件', '⌥⌘V'], ['创建副本', '⌘D'], ['全选 / 新建文件夹', '⌘A / ⇧⌘N'], ['移到废纸篓', '⌘⌫'], ['快速查看', 'Space / ⌘Y'], ['后退 / 前进 / 上一级', '⌘[ / ⌘] / ⌘↑'], ['前往文件夹 / 搜索', '⇧⌘G / ⌘F'], ['新建 / 关闭标签页', '⌘T / ⌘W'], ['切换标签页', '⌃Tab / ⌃⇧Tab'], ['图标 / 详细信息视图', '⌘1 / ⌘2'], ['预览窗格 / 隐藏项目', '⇧⌘P / ⇧⌘.'], ['详细信息窗格', '⌘I']].map(([name, keys]) => <div key={name}><span>{name}</span><kbd>{keys}</kbd></div>)}</div><p className="shortcut-note">移动文件：先 ⌘C，再到目标文件夹按 ⌥⌘V。保留 Ctrl+C / X / V、F2、F5 等兼容快捷键；输入框内沿用文本编辑快捷键。</p></> : modal.kind === 'trash' ? <div className="trash-description"><Trash2 size={34} strokeWidth={1.4}/><div><p>将{modal.paths.length === 1 ? `“${base(modal.paths[0])}”` : `这 ${modal.paths.length} 个项目`}移到废纸篓？</p><small>文件将移入 macOS 废纸篓，你可以从那里恢复。</small></div></div> : <><label className="name-label" htmlFor="entry-name">名称</label><input ref={inputRef} id="entry-name" value={value} onChange={event => onChange(event.target.value)} disabled={busy} autoComplete="off"/><p className="modal-location">位置：{modal.kind === 'rename' ? parent(modal.path) : modal.path}</p></>}
       {error && <p className="modal-error" role="alert">{error}</p>}
       <div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>{modal.kind === 'shortcuts' ? '知道了' : '取消'}</button>{modal.kind !== 'shortcuts' && <button type="submit" className="primary-button" disabled={busy || modal.kind !== 'trash' && !value.trim()}>{busy ? '正在处理…' : modal.kind === 'trash' ? '移到废纸篓' : '确定'}</button>}</div>
     </form>

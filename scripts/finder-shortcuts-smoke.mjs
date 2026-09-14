@@ -1,0 +1,68 @@
+import { _electron as electron } from 'playwright';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+const root = await fs.mkdtemp(path.join(os.tmpdir(), 'explorer-finder-keys-'));
+for (const folder of ['Documents', 'Desktop', 'Downloads']) await fs.mkdir(path.join(root, folder));
+const docs = path.join(root, 'Documents');
+await fs.mkdir(path.join(docs, '目标'));
+await fs.writeFile(path.join(docs, '原文件.txt'), 'preserved content');
+await fs.writeFile(path.join(docs, '.hidden-test'), 'hidden');
+const app = await electron.launch({ ...(process.env.EXPLORER_APP_PATH ? { executablePath: process.env.EXPLORER_APP_PATH, args: [] } : { args: [process.cwd()] }), env: { ...process.env, EXPLORER_TEST_ROOT: root, EXPLORER_TEST_HIDDEN: '1' } });
+try {
+  await app.evaluate(async ({ clipboard, ClipboardItem, shell }) => {
+    globalThis.savedClipboard = await Promise.all((await clipboard.read()).map(async item => new ClipboardItem(Object.fromEntries(await Promise.all(item.types.map(async type => [type, await item.getType(type)]))))));
+    globalThis.opened = []; shell.openPath = async p => { globalThis.opened.push(p); return ''; };
+  });
+  const page = await app.firstWindow(); page.setDefaultTimeout(15000);
+  const row = name => page.getByRole('option', { name, exact: true });
+  const go = async folder => {
+    await page.keyboard.press('Meta+Shift+g');
+    const input = page.getByRole('textbox', { name: '文件夹地址', exact: true });
+    await input.fill(folder); await input.press('Enter');
+    await page.waitForFunction(p => document.querySelector('.file-content')?.getAttribute('aria-label') === p, path.basename(folder) === 'Documents' ? '文档' : path.basename(folder));
+  };
+  await row('原文件.txt').click(); await page.keyboard.press('Enter');
+  await page.getByLabel('名称', { exact: true }).fill('已改名.txt');
+  await page.getByLabel('名称', { exact: true }).press('Enter'); await row('已改名.txt').waitFor();
+  assert.deepEqual(await app.evaluate(() => globalThis.opened), []);
+  await page.keyboard.press('Enter'); await page.getByLabel('名称', { exact: true }).fill('不应保存.txt');
+  await page.keyboard.press('Escape'); await row('已改名.txt').waitFor();
+  await page.keyboard.press('Meta+o');
+  await page.waitForFunction(async () => JSON.parse(localStorage.getItem('recent') || '[]').some(p => p.endsWith('已改名.txt')));
+  assert.deepEqual(await app.evaluate(() => globalThis.opened), [path.join(docs, '已改名.txt')]);
+  for (const key of ['Backspace', 'Delete']) { await page.keyboard.press(key); assert.equal(await page.getByRole('dialog').count(), 0); await row('已改名.txt').waitFor(); }
+  await page.keyboard.press('Meta+Backspace'); await page.getByRole('dialog').waitFor();
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await row('已改名.txt').click(); await page.keyboard.press('Meta+c');
+  await page.waitForFunction(async () => (await window.explorer.clipboardGet()).paths.some(p => p.endsWith('已改名.txt')));
+  await row('目标').click(); await page.keyboard.press('Meta+ArrowDown'); await page.getByText('此文件夹为空', { exact: true }).waitFor();
+  await page.keyboard.press('Meta+Alt+v'); await row('已改名.txt').waitFor();
+  await assert.rejects(fs.access(path.join(docs, '已改名.txt')));
+  assert.equal(await fs.readFile(path.join(docs, '目标', '已改名.txt'), 'utf8'), 'preserved content');
+  await page.keyboard.press('Meta+z'); await page.getByText('此文件夹为空', { exact: true }).waitFor();
+  await page.keyboard.press('Meta+ArrowUp'); await row('已改名.txt').waitFor();
+  await page.keyboard.press('Meta+['); await page.getByText('此文件夹为空', { exact: true }).waitFor();
+  await page.keyboard.press('Meta+]'); await row('已改名.txt').waitFor();
+  await row('已改名.txt').click(); await page.keyboard.press('Meta+d'); await row('已改名 - 副本.txt').waitFor();
+  await page.keyboard.press('Meta+Shift+n'); await page.getByLabel('名称', { exact: true }).fill('新目录');
+  await page.getByLabel('名称', { exact: true }).press('Enter'); await row('新目录').waitFor();
+  await page.keyboard.press('Meta+1'); await page.locator('.icon-grid').waitFor();
+  await page.keyboard.press('Meta+2'); await page.locator('.file-table').waitFor();
+  await page.keyboard.press('Meta+Shift+.'); await row('.hidden-test').waitFor();
+  await page.keyboard.press('Meta+Shift+p'); await page.locator('.preview-pane').waitFor();
+  await page.keyboard.press('Meta+Shift+p'); assert.equal(await page.locator('.preview-pane').count(), 0);
+  await page.keyboard.press('Meta+Shift+g'); const address = page.getByRole('textbox', { name: '文件夹地址', exact: true });
+  await address.fill(docs); await address.press('Backspace'); assert.equal(await address.inputValue(), docs.slice(0, -1));
+  await address.press('Escape');
+  await page.keyboard.press('Meta+f'); assert.equal(await page.getByRole('textbox', { name: '搜索文件', exact: true }).evaluate(el => document.activeElement === el), true);
+  await page.keyboard.press('Escape'); await row('已改名.txt').click();
+  await go(path.join(docs, '目标')); await page.getByText('此文件夹为空', { exact: true }).waitFor();
+  assert.equal(await fs.readFile(path.join(docs, '已改名.txt'), 'utf8'), 'preserved content');
+  console.log('PASS: Return rename/confirm/cancel, Command open/up/history, copy-move-undo, duplicate/new folder, trash confirmation, views/panes/hidden, address/search and text-input guards. External file launch mocked.');
+} finally {
+  await app.evaluate(async ({ clipboard }) => { if (globalThis.savedClipboard?.length) await clipboard.write(globalThis.savedClipboard); else clipboard.clear(); }).catch(() => {});
+  await app.close(); await fs.rm(root, { recursive: true, force: true });
+}

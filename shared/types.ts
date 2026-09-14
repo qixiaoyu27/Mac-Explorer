@@ -26,7 +26,7 @@ export interface ExplorerAPI {
   compressArchive(paths: string[]): Promise<string>;
   openArchiveFile(path: string, member: string): Promise<void>;
   extractArchive(path: string, selected: string[] | null, mode: ExtractMode): Promise<OperationResult | null>;
-  openWith(paths: string[]): Promise<boolean>;
+  openWith(paths: string[], editor?: 'textedit'): Promise<boolean>;
   quickLook(path: string): Promise<void>;
   reveal(path: string): Promise<void>;
   openTerminal(path: string): Promise<void>;
@@ -39,7 +39,7 @@ export interface ExplorerAPI {
   trash(paths: string[]): Promise<OperationResult>;
   clipboardSet(paths: string[], cut: boolean): Promise<ClipboardInfo>;
   clipboardGet(): Promise<ClipboardInfo>;
-  paste(parent: string): Promise<OperationResult>;
+  paste(parent: string, move?: boolean): Promise<OperationResult>;
   copyTo(paths: string[], parent: string): Promise<OperationResult>;
   history(): Promise<string | null>;
   undo(): Promise<OperationResult>;

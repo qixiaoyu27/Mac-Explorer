@@ -175,11 +175,18 @@ ipc('extract-archive', async (input: string, selected: unknown, mode: unknown) =
   } finally { extracting = false; }
 });
 ipc('reveal', (input: string) => shell.showItemInFolder(absolute(input)));
-ipc('open-with', async (inputs: unknown) => {
+ipc('open-with', async (inputs: unknown, editor?: unknown) => {
+  if (editor !== undefined && editor !== 'textedit') throw new Error('无效的文本编辑器。');
   const paths = [...new Set(pathsArg(inputs))];
   if (!paths.length) throw new Error('请先选择要打开的文件。');
   for (const filePath of paths) {
     if (!(await fs.stat(filePath)).isFile()) throw new Error('请选择文件，然后选择打开方式。');
+  }
+  if (editor === 'textedit') {
+    // A running TextEdit ignores launch arguments. Use a separate instance with
+    // volatile overrides so HTML/RTF opens as source without changing user defaults.
+    await promisify(execFile)('/usr/bin/open', ['-n', '-b', 'com.apple.TextEdit', ...paths, '--args', '-IgnoreHTML', 'YES', '-IgnoreRichText', 'YES']);
+    return true;
   }
   const choice = await dialog.showOpenDialog(window!, {
     title: '选择打开方式',
@@ -251,8 +258,10 @@ ipc('trash', async (inputs: unknown): Promise<OperationResult> => {
 });
 ipc('clipboard-set', (inputs: unknown, cut: boolean) => setClipboard(pathsArg(inputs), !!cut));
 ipc('clipboard-get', getClipboard);
-ipc('paste', async (parent: string) => {
+ipc('paste', async (parent: string, move: unknown = false) => {
+  if (typeof move !== 'boolean') throw new Error('无效的移动选项。');
   const clip = await getClipboard();
+  clip.cut ||= move;
   if (clip.cut) clip.paths.forEach(protect);
   const result = await transferEntries(clip.paths, absolute(parent), clip.cut);
   await history.record(clip.cut ? '移动' : '复制', result.changes || []);
@@ -311,7 +320,7 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: 'Mac Explorer', submenu: [{ role: 'about', label: '关于 Mac Explorer' }, { type: 'separator' }, { role: 'hide', label: '隐藏' }, { role: 'quit', label: '退出' }] },
     { label: '文件', submenu: [{ label: '新建标签页', accelerator: 'Command+T', click: action('new-tab') }, { label: '打开文件夹…', click: action('choose-folder') }, { label: '新建文件夹', accelerator: 'Command+Shift+N', click: action('new-folder') }, { type: 'separator' }, { label: '关闭标签页', accelerator: 'Command+W', click: action('close-tab') }, { role: 'close', label: '关闭窗口', accelerator: 'Command+Shift+W' }] },
-    { label: '编辑', submenu: [{ label: '撤销', accelerator: 'Command+Z', click: action('undo') }, { type: 'separator' }, { label: '剪切', accelerator: 'Command+X', click: action('cut') }, { label: '复制', accelerator: 'Command+C', click: action('copy') }, { label: '粘贴', accelerator: 'Command+V', click: action('paste') }, { label: '全选', accelerator: 'Command+A', click: action('select-all') }] },
+    { label: '编辑', submenu: [{ label: '撤销', accelerator: 'Command+Z', click: action('undo') }, { type: 'separator' }, { label: '剪切', accelerator: 'Command+X', click: action('cut') }, { label: '复制', accelerator: 'Command+C', click: action('copy') }, { label: '粘贴', accelerator: 'Command+V', click: action('paste') }, { label: '将项目移到这里', accelerator: 'Command+Alt+V', click: action('move-here') }, { label: '全选', accelerator: 'Command+A', click: action('select-all') }] },
     { label: '显示', submenu: [{ label: '刷新', click: action('refresh') }, { label: '显示隐藏的项目', click: action('hidden') }, { role: 'togglefullscreen', label: '进入全屏' }] },
     { label: '窗口', submenu: [{ role: 'minimize', label: '最小化' }, { role: 'zoom', label: '缩放' }, { role: 'front', label: '前置全部窗口' }] },
   ]));

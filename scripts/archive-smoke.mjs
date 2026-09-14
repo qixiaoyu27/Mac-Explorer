@@ -67,13 +67,13 @@ try {
  await fs.mkdir('artifacts', { recursive: true });
  await page.screenshot({ path: 'artifacts/archive-preview.png' });
  await page.keyboard.press('Escape');
- await entry.click(); await page.keyboard.press('Enter'); await dialog.waitFor(); await page.keyboard.press('Escape');
+ await entry.click(); await page.keyboard.press('Meta+o'); await dialog.waitFor(); await page.keyboard.press('Escape');
  await entry.click({ button: 'right' }); await page.getByRole('menuitem', { name: '打开', exact: true }).click(); await dialog.waitFor(); await page.keyboard.press('Escape');
  await page.keyboard.press('Control+l');
  await page.getByRole('textbox', { name: '文件夹地址', exact: true }).fill(zip);
  await page.getByRole('textbox', { name: '文件夹地址', exact: true }).press('Enter'); await dialog.waitFor(); await page.keyboard.press('Escape');
  assert.equal(await app.evaluate(() => globalThis.externalOpens.length), 0);
- console.log('PASS: double-click, Enter, context Open and address all preview ZIP; nested folders and literal special paths');
+ console.log('PASS: double-click, Command+O, context Open and address all preview ZIP; nested folders and literal special paths');
  await page.getByRole('option', { name: '资料.tar.gz', exact: true }).dblclick();
  await page.getByRole('dialog').getByRole('button', { name: '中文文件.txt', exact: true }).waitFor(); await page.keyboard.press('Escape');
  await page.getByRole('option', { name: '空.zip', exact: true }).dblclick(); await page.getByText('此压缩包为空', { exact: true }).waitFor(); await page.keyboard.press('Escape');

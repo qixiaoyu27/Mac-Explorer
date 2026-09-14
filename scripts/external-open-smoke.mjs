@@ -42,7 +42,7 @@ try {
   await emit([docs]);
   await page.waitForFunction(() => document.querySelector('[role=tab][aria-selected=true]')?.textContent === '文档');
   console.log('folder passed');
-  await selected('保持原状.txt').click(); await page.keyboard.press('Delete');
+  await selected('保持原状.txt').click(); await page.keyboard.press('Meta+Backspace');
   await page.getByRole('dialog').waitFor();
   await emit([file]);
   // Use a confirmation dialog: inline rename intentionally saves on blur,
