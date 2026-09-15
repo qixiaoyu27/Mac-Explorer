@@ -33,7 +33,11 @@ try {
   await page.keyboard.press('Meta+o');
   await page.waitForFunction(async () => JSON.parse(localStorage.getItem('recent') || '[]').some(p => p.endsWith('已改名.txt')));
   assert.deepEqual(await app.evaluate(() => globalThis.opened), [path.join(docs, '已改名.txt')]);
-  for (const key of ['Backspace', 'Delete']) { await page.keyboard.press(key); assert.equal(await page.getByRole('dialog').count(), 0); await row('已改名.txt').waitFor(); }
+  await page.keyboard.press('Delete'); assert.equal(await page.getByRole('dialog').count(), 0); await row('已改名.txt').waitFor();
+  await page.keyboard.press('Backspace');
+  await page.locator('.file-content[aria-label="个人文件夹"][aria-busy=false]').waitFor();
+  assert.equal(await fs.readFile(path.join(docs, '已改名.txt'), 'utf8'), 'preserved content');
+  await row('Documents').dblclick(); await row('已改名.txt').click();
   await page.keyboard.press('Meta+Backspace'); await page.getByRole('dialog').waitFor();
   await page.getByRole('button', { name: '取消', exact: true }).click();
   await row('已改名.txt').click(); await page.keyboard.press('Meta+c');
@@ -57,11 +61,17 @@ try {
   await page.keyboard.press('Meta+Shift+g'); const address = page.getByRole('textbox', { name: '文件夹地址', exact: true });
   await address.fill(docs); await address.press('Backspace'); assert.equal(await address.inputValue(), docs.slice(0, -1));
   await address.press('Escape');
+  await page.keyboard.press('Meta+Shift+c'); await page.locator('.computer-content').waitFor();
+  await page.keyboard.press('Backspace'); assert.equal(await page.locator('.computer-content').count(), 1);
+  await page.keyboard.press('Meta+Shift+g'); await address.fill('/'); await address.press('Enter');
+  await page.locator('.file-content[aria-label="Macintosh HD"][aria-busy=false]').waitFor();
+  await page.keyboard.press('Backspace'); assert.equal(await page.locator('.file-content').getAttribute('aria-label'), 'Macintosh HD');
+  await go(docs); await row('已改名.txt').waitFor();
   await page.keyboard.press('Meta+f'); assert.equal(await page.getByRole('textbox', { name: '搜索文件', exact: true }).evaluate(el => document.activeElement === el), true);
   await page.keyboard.press('Escape'); await row('已改名.txt').click();
   await go(path.join(docs, '目标')); await page.getByText('此文件夹为空', { exact: true }).waitFor();
   assert.equal(await fs.readFile(path.join(docs, '已改名.txt'), 'utf8'), 'preserved content');
-  console.log('PASS: Return rename/confirm/cancel, Command open/up/history, copy-move-undo, duplicate/new folder, trash confirmation, views/panes/hidden, address/search and text-input guards. External file launch mocked.');
+  console.log('PASS: Return rename/confirm/cancel, Backspace parent/root/virtual/input guards, Command open/up/history, copy-move-undo, duplicate/new folder, trash confirmation, views/panes/hidden, address/search and text-input guards. External file launch mocked.');
 } finally {
   await app.evaluate(async ({ clipboard }) => { if (globalThis.savedClipboard?.length) await clipboard.write(globalThis.savedClipboard); else clipboard.clear(); }).catch(() => {});
   await app.close(); await fs.rm(root, { recursive: true, force: true });

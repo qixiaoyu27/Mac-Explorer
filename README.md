@@ -63,7 +63,7 @@ xattr -dr com.apple.quarantine "/Applications/Mac Explorer.app"
 每次发布附带 `SHA256SUMS.txt`。在下载目录运行以下命令，并将输出与同一 Release 中的校验文件对照：
 
 ```sh
-shasum -a 256 Mac-Explorer-0.1.21-mac-arm64.dmg
+shasum -a 256 Mac-Explorer-0.1.22-mac-arm64.dmg
 ```
 
 使用 ZIP 时，对 ZIP 文件执行相同校验即可。
@@ -125,14 +125,14 @@ ZIP、TAR.GZ、7z 已通过测试；其他格式（包括 RAR）取决于 macOS 
 | 创建副本 / 全选 | ⌘D / ⌘A |
 | 新建文件夹 / 移到废纸篓 | ⇧⌘N / ⌘⌫ |
 | 前往文件夹 / 搜索 | ⇧⌘G / ⌘F |
-| 后退 / 前进 / 上一级 | ⌘[ / ⌘] / ⌘↑ |
+| 后退 / 前进 / 上一级 | ⌘[ / ⌘] / Backspace 或 ⌘↑ |
 | 新建 / 关闭 / 切换标签页 | ⌘T / ⌘W / ⌃Tab 或 ⌃⇧Tab |
 | 图标 / 详细信息视图 | ⌘1 / ⌘2 |
 | 预览窗格 / 详细信息窗格 | ⇧⌘P / ⌘I |
 | 隐藏项目 / 导航窗格 | ⇧⌘. / ⌥⌘S |
 | 个人文件夹 / 桌面 / 文档 / 下载 / 此电脑 | ⇧⌘H / ⇧⌘D / ⇧⌘O / ⌥⌘L / ⇧⌘C |
 
-保留 Ctrl+C / X / V、F2 重命名、F5 刷新等兼容快捷键。文件列表中单独按退格或 Delete 不会删除文件；⌘X 仅用于输入框内剪切文字。
+保留 Ctrl+C / X / V、F2 重命名、F5 刷新等兼容快捷键。文件列表中 Backspace 返回上一级，Delete 不执行删除；⌘X 仅用于输入框内剪切文字。
 
 ## 与其他应用配合
 
