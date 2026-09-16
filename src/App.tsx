@@ -45,7 +45,7 @@ function ViewGlyph({ mode }: { mode: 'extra' | 'large' | 'medium' | 'small' | 'l
 }
 function FolderGlyph({ dimension = 38, badge }: { dimension?: number; badge?: string }) {
   return <span className="folder-glyph" style={{ width: dimension, height: dimension }} aria-hidden="true">
-    <svg viewBox="0 0 48 44" fill="none"><path d="M3 10a3 3 0 0 1 3-3h12l5 5h19a3 3 0 0 1 3 3v23H3V10Z" fill="#d79b20"/><path d="M3 16h42v20a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V16Z" fill="#ffcb4c"/><path d="M3 16h42v4H3z" fill="#ffdb71"/><path d="M6 39h36" stroke="#dfa629" strokeWidth="1"/></svg>
+    <svg viewBox="0 0 48 44" fill="none"><defs><linearGradient id="folder-front" x1="24" y1="16" x2="24" y2="39" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffdf8a"/><stop offset="1" stop-color="#ffca4e"/></linearGradient></defs><path d="M3 10a3 3 0 0 1 3-3h12l5 5h19a3 3 0 0 1 3 3v21a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V10Z" fill="#d79b20"/><path d="M3 16h42v20a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V16Z" fill="url(#folder-front)"/><path d="M3 16h42v2H3z" fill="#c98a1b" opacity="0.12"/><path d="M3 36h42a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3Z" fill="#dfa629" opacity="0.15"/></svg>
     {badge && <span className={`folder-badge badge-${badge}`}><PlaceIcon icon={badge} size={dimension > 45 ? 20 : 14}/></span>}
   </span>;
 }
