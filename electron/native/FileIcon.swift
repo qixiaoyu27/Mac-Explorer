@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
+import PDFKit
 
 // Keep NSWorkspace's multi-resolution icon intact until drawing at the requested
 // physical pixel size. Resizing Electron's 32px bitmap cannot recover this detail.
@@ -25,7 +26,17 @@ func render(_ request: Request) throws -> String {
     guard request.path.hasPrefix("/"), FileManager.default.fileExists(atPath: request.path) else {
         throw NSError(domain: "FileIcon", code: 1, userInfo: [NSLocalizedDescriptionKey: "文件已不存在"])
     }
-    let thumbnail = imageThumbnail(request.path, pixels: pixels)
+    let isPDF = URL(fileURLWithPath: request.path).pathExtension.lowercased() == "pdf"
+    let thumbnail: NSImage?
+    if isPDF {
+        guard let document = PDFDocument(url: URL(fileURLWithPath: request.path)), !document.isLocked,
+            let page = document.page(at: 0) else {
+            throw NSError(domain: "FileIcon", code: 4, userInfo: [NSLocalizedDescriptionKey: "无法预览 PDF 首页"])
+        }
+        thumbnail = page.thumbnail(of: NSSize(width: pixels, height: pixels), for: .cropBox)
+    } else {
+        thumbnail = imageThumbnail(request.path, pixels: pixels)
+    }
     let icon = thumbnail ?? NSWorkspace.shared.icon(forFile: request.path)
     guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels,
         bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,

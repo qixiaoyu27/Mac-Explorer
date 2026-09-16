@@ -8,7 +8,19 @@ import { execFileSync } from 'node:child_process';
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'explorer-document-icons-'));
 const docs = path.join(root, 'Documents');
 await fs.mkdir(docs);
-await fs.writeFile(path.join(docs, '说明.PDF'), '%PDF-1.4\nIcon test fixture');
+function pdfFixture(rotation = 0) {
+  const streams = ['1 0 0 rg 0 0 100 300 re f 0 0 1 rg 100 0 100 300 re f', '0 1 0 rg 0 0 200 300 re f'];
+  const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>',
+    ...streams.flatMap((stream, i) => [`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Rotate ${rotation} /Resources << >> /Contents ${4 + i * 2} 0 R >>`, `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`])];
+  let result = '%PDF-1.4\n'; const offsets = [0];
+  objects.forEach((object, i) => { offsets.push(Buffer.byteLength(result)); result += `${i + 1} 0 obj\n${object}\nendobj\n`; });
+  const xref = Buffer.byteLength(result);
+  result += `xref\n0 ${offsets.length}\n0000000000 65535 f \n` + offsets.slice(1).map(offset => `${String(offset).padStart(10, '0')} 00000 n \n`).join('');
+  return result + `trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+}
+await fs.writeFile(path.join(docs, '说明.PDF'), pdfFixture());
+await fs.writeFile(path.join(docs, '横向.pdf'), pdfFixture(90));
+await fs.writeFile(path.join(docs, '损坏.pdf'), '%PDF-1.4\nInvalid PDF');
 const app = await electron.launch({ colorScheme: null, ...(process.env.EXPLORER_APP_PATH ? { executablePath: process.env.EXPLORER_APP_PATH, args: [] } : { args: [process.cwd()] }), env: { ...process.env, EXPLORER_TEST_ROOT: root } });
 const page = await app.firstWindow();
 const errors = [];
@@ -64,6 +76,16 @@ try {
   assert.ok((await measure('损坏.png')).bounds[0] > 0, 'corrupt image falls back to a system icon');
   console.log('PASS: PNG/JPEG/WebP/HEIC/TIFF/GIF/BMP contents, aspect ratio, EXIF orientation, transparency and corrupt-image fallback');
 
+  const pdfPage = await measure('说明.PDF');
+  assert.ok(Math.abs(pdfPage.bounds[0] / pdfPage.bounds[1] - 2 / 3) < .02);
+  assert.ok(pdfPage.left[0] > 200 && pdfPage.right[2] > 200, 'PDF thumbnail shows the red/blue first page, not the green second page');
+  const rotatedPDF = await measure('横向.pdf');
+  assert.ok(Math.abs(rotatedPDF.bounds[0] / rotatedPDF.bounds[1] - 1.5) < .02);
+  const invalidPDF = page.getByRole('option', { name: '损坏.pdf', exact: true });
+  assert.equal(await invalidPDF.locator('svg.pdf-glyph').count(), 1);
+  assert.equal(await invalidPDF.locator('.pdf-thumbnail').count(), 0);
+  console.log('PASS: PDF first-page content, page aspect ratio, rotation and invalid-PDF fallback');
+
   const before = await measure('图片.png');
   await fs.writeFile(path.join(docs, '图片.png'), Buffer.from(fixtures.updated.split(',')[1], 'base64'));
   const changed = new Date(Date.now() + 2000); await fs.utimes(path.join(docs, '图片.png'), changed, changed);
@@ -76,14 +98,21 @@ try {
   for (const [label, size] of [['小图标', 32], ['中图标', 48], ['大图标', 64], ['超大图标', 128]]) {
     await page.getByRole('button', { name: '查看', exact: true }).click();
     await page.getByRole('menuitemradio', { name: label, exact: true }).click();
-    const pdf = page.getByRole('option', { name: '说明.PDF', exact: true }).locator('svg.pdf-glyph');
+    const pdf = page.getByRole('option', { name: '说明.PDF', exact: true }).locator('.pdf-thumbnail');
+    await pdf.waitFor();
     assert.equal(await pdf.evaluate(el => el.getBoundingClientRect().width), size);
     assert.equal(await pdf.locator('rect').getAttribute('fill'), '#b30b00');
+    const placement = await pdf.evaluate(el => {
+      const frame = el.getBoundingClientRect(), badge = el.querySelector('.pdf-badge').getBoundingClientRect();
+      return { right: frame.right - badge.right, bottom: frame.bottom - badge.bottom, width: badge.width };
+    });
+    assert.ok(Math.abs(placement.right) < 1 && Math.abs(placement.bottom) < 1);
+    assert.ok(placement.width < size / 2);
   }
   await fs.mkdir('artifacts', { recursive: true });
   await page.screenshot({ path: 'artifacts/document-icons-light.png' });
   await page.evaluate(() => window.explorer.setTheme('dark')); await page.reload();
-  await page.locator('svg.pdf-glyph').waitFor();
+  await page.getByRole('option', { name: '说明.PDF', exact: true }).locator('.pdf-thumbnail').waitFor();
   await page.waitForFunction(() => getComputedStyle(document.body).backgroundColor === 'rgb(25, 25, 25)');
   await page.screenshot({ path: 'artifacts/document-icons-dark.png' });
   assert.deepEqual(errors, []);
