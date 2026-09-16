@@ -1,17 +1,32 @@
 import AppKit
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 // Keep NSWorkspace's multi-resolution icon intact until drawing at the requested
 // physical pixel size. Resizing Electron's 32px bitmap cannot recover this detail.
 struct Request: Decodable { let id: Int; let path: String; let pixels: Int }
 struct Response: Encodable { let id: Int; let data: String?; let error: String? }
 
+func imageThumbnail(_ path: String, pixels: Int) -> NSImage? {
+    let url = URL(fileURLWithPath: path)
+    guard UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true,
+        let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+        let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: pixels,
+        ] as CFDictionary) else { return nil }
+    return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+}
+
 func render(_ request: Request) throws -> String {
     let pixels = min(512, max(32, request.pixels))
     guard request.path.hasPrefix("/"), FileManager.default.fileExists(atPath: request.path) else {
         throw NSError(domain: "FileIcon", code: 1, userInfo: [NSLocalizedDescriptionKey: "文件已不存在"])
     }
-    let icon = NSWorkspace.shared.icon(forFile: request.path)
+    let thumbnail = imageThumbnail(request.path, pixels: pixels)
+    let icon = thumbnail ?? NSWorkspace.shared.icon(forFile: request.path)
     guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels,
         bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
@@ -26,9 +41,16 @@ func render(_ request: Request) throws -> String {
     context.imageInterpolation = .high
     NSColor.clear.setFill()
     bounds.fill(using: .copy)
-    icon.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 1,
+    var imageBounds = bounds
+    if thumbnail != nil {
+        let scale = min(bounds.width / icon.size.width, bounds.height / icon.size.height)
+        let width = icon.size.width * scale, height = icon.size.height * scale
+        imageBounds = NSRect(x: (bounds.width - width) / 2, y: (bounds.height - height) / 2, width: width, height: height)
+    }
+    icon.draw(in: imageBounds, from: .zero, operation: .sourceOver, fraction: 1,
         respectFlipped: false, hints: [.interpolation: NSImageInterpolation.high])
-    let cleaned = stripShadow(bitmap, pixels: pixels)
+    // Photographs and transparent artwork must retain their original pixels.
+    let cleaned = thumbnail == nil ? stripShadow(bitmap, pixels: pixels) : bitmap
     guard let png = cleaned.representation(using: .png, properties: [:]) else {
         throw NSError(domain: "FileIcon", code: 3)
     }

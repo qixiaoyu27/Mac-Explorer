@@ -63,7 +63,7 @@ xattr -dr com.apple.quarantine "/Applications/Mac Explorer.app"
 每次发布附带 `SHA256SUMS.txt`。在下载目录运行以下命令，并将输出与同一 Release 中的校验文件对照：
 
 ```sh
-shasum -a 256 Mac-Explorer-0.1.23-mac-arm64.dmg
+shasum -a 256 Mac-Explorer-0.1.24-mac-arm64.dmg
 ```
 
 使用 ZIP 时，对 ZIP 文件执行相同校验即可。
@@ -78,6 +78,7 @@ shasum -a 256 Mac-Explorer-0.1.23-mac-arm64.dmg
 | 一次选择多个文件 | 空白处拖动框选，支持边缘滚动；⌘/Ctrl 增减选择、Shift 追加、Esc 取消。项目复选框悬停时显示，勾选后保持显示 |
 | 常用目录随手可达 | 快速访问固定与取消固定，默认目录也可取消 |
 | 右键完成日常任务 | 新建、重命名、复制、剪切、粘贴、ZIP 压缩、选择打开方式、使用文本编辑、打开终端 |
+| 从图标识别文件 | PDF 专用矢量图标；PNG、JPEG、WebP、HEIC、TIFF、GIF、BMP 显示图片缩略图，保留比例与透明度，解码失败时回退到系统图标 |
 | 不打开文件也能看内容 | 文本和图片预览、详细信息窗格、Space 调用 macOS 快速查看 |
 | 从其他应用跳到文件 | 接收系统“打开方式”请求：进入文件夹，或定位并选中文件 |
 
@@ -192,6 +193,7 @@ npm run dev
 | `npm run test:archive` / `npm run test:compression` | 归档浏览、解压、压缩与文件保留 |
 | `npm run test:external` | 外部路径打开、文件定位与请求排队 |
 | `npm run package` | 本机体验包：ad-hoc 签名，未公证 |
+| `npm run test:document-icons` | PDF 图标、多格式缩略图、方向与透明度、修改刷新回归 |
 | `npm run package:release` | 临时签名 DMG / ZIP 与 SHA-256 校验文件，无需证书 |
 
 `package:release` 固定使用临时签名，禁用签名身份自动发现，不读取 Developer ID 或公证凭证，也不提交 Apple 公证。产物位于 `release/adhoc-版本号/`；构建不会自动上传 GitHub。

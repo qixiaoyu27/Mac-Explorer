@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { stat } from 'node:fs/promises';
 
 export class FileIcons {
   private worker?: ChildProcessWithoutNullStreams;
@@ -9,9 +10,10 @@ export class FileIcons {
 
   constructor(private executable: string) {}
 
-  get(filePath: string, requestedPixels: number): Promise<string> {
+  async get(filePath: string, requestedPixels: number): Promise<string> {
     const pixels = [64, 128, 256, 512].find(size => size >= requestedPixels) || 512;
-    const key = `${pixels}:${filePath}`;
+    const file = await stat(filePath);
+    const key = `${pixels}:${filePath}:${file.mtimeMs}:${file.size}`;
     const cached = this.cache.get(key);
     if (cached) return cached;
     const result = new Promise<string>((resolve, reject) => {
