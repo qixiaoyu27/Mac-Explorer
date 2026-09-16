@@ -20,3 +20,5 @@ The user's reference is binding: reproduce Windows 11 File Explorer in Operate m
 ## Motion
 
 Follow Fluent timing: 83ms for hover/selection color, 167ms for menus, tabs and loaded file views, and 250ms for dialogs and right-side panes. Use `cubic-bezier(0, 0, 0, 1)` for arrivals. Navigation moves the file surface just 4px; panes enter 12px from the right. Never stagger individual files or delay an operation for animation. Cancel interrupted navigation animations, retain focus/scroll/selection, and skip motion when Reduce Motion is enabled. Menus dismiss immediately so actions remain responsive.
+
+- Images and PDF first pages retain content thumbnails. Word/Excel/PowerPoint use native Quick Look content previews when available; pagination and worksheet coverage are system-defined. Content thumbnails carry the actual default application icon at bottom right. Corrupt, locked, unsupported, or timed-out previews retain the system file icon. Refresh re-reads associations without changing system defaults.

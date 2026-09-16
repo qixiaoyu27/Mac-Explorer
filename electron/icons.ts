@@ -55,5 +55,7 @@ export class FileIcons {
     return worker;
   }
 
+  clearCache() { this.cache.clear(); }
+
   close() { this.worker?.kill(); }
 }

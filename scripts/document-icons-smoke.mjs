@@ -57,7 +57,7 @@ try {
       const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0);
       const values = ctx.getImageData(0, 0, img.width, img.height).data;
       let minX = img.width, minY = img.height, maxX = -1, maxY = -1;
-      for (let y = 0; y < img.height; y++) for (let x = 0; x < img.width; x++) if (values[(y * img.width + x) * 4 + 3]) {
+      for (let y = 0; y < img.height; y++) for (let x = 0; x < img.width; x++) if (values[(y * img.width + x) * 4 + 3] && !(x >= img.width * .66 && y >= img.height * .66)) {
         minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
       }
       const sample = x => Array.from(ctx.getImageData(Math.round(img.width * x), Math.floor(img.height / 2), 1, 1).data);
@@ -82,8 +82,7 @@ try {
   const rotatedPDF = await measure('横向.pdf');
   assert.ok(Math.abs(rotatedPDF.bounds[0] / rotatedPDF.bounds[1] - 1.5) < .02);
   const invalidPDF = page.getByRole('option', { name: '损坏.pdf', exact: true });
-  assert.equal(await invalidPDF.locator('svg.pdf-glyph').count(), 1);
-  assert.equal(await invalidPDF.locator('.pdf-thumbnail').count(), 0);
+  await invalidPDF.locator('img.file-glyph').waitFor();
   console.log('PASS: PDF first-page content, page aspect ratio, rotation and invalid-PDF fallback');
 
   const before = await measure('图片.png');
@@ -98,25 +97,18 @@ try {
   for (const [label, size] of [['小图标', 32], ['中图标', 48], ['大图标', 64], ['超大图标', 128]]) {
     await page.getByRole('button', { name: '查看', exact: true }).click();
     await page.getByRole('menuitemradio', { name: label, exact: true }).click();
-    const pdf = page.getByRole('option', { name: '说明.PDF', exact: true }).locator('.pdf-thumbnail');
+    const pdf = page.getByRole('option', { name: '说明.PDF', exact: true }).locator('img.file-glyph');
     await pdf.waitFor();
     assert.equal(await pdf.evaluate(el => el.getBoundingClientRect().width), size);
-    assert.equal(await pdf.locator('rect').getAttribute('fill'), '#b30b00');
-    const placement = await pdf.evaluate(el => {
-      const frame = el.getBoundingClientRect(), badge = el.querySelector('.pdf-badge').getBoundingClientRect();
-      return { right: frame.right - badge.right, bottom: frame.bottom - badge.bottom, width: badge.width };
-    });
-    assert.ok(Math.abs(placement.right) < 1 && Math.abs(placement.bottom) < 1);
-    assert.ok(placement.width < size / 2);
   }
   await fs.mkdir('artifacts', { recursive: true });
   await page.screenshot({ path: 'artifacts/document-icons-light.png' });
   await page.evaluate(() => window.explorer.setTheme('dark')); await page.reload();
-  await page.getByRole('option', { name: '说明.PDF', exact: true }).locator('.pdf-thumbnail').waitFor();
+  await page.getByRole('option', { name: '说明.PDF', exact: true }).locator('img.file-glyph').waitFor();
   await page.waitForFunction(() => getComputedStyle(document.body).backgroundColor === 'rgb(25, 25, 25)');
   await page.screenshot({ path: 'artifacts/document-icons-dark.png' });
   assert.deepEqual(errors, []);
-  console.log('PASS: custom PDF vector renders at all four sizes; light/dark screenshots captured');
+  console.log('PASS: PDF thumbnail renders at all four sizes; light/dark screenshots captured');
 } finally {
   await app.close();
   await fs.rm(root, { recursive: true, force: true });

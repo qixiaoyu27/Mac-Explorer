@@ -63,27 +63,16 @@ function FolderGlyph({ dimension = 38, badge }: { dimension?: number; badge?: st
     {badge && <span className={`folder-badge badge-${badge}`}><PlaceIcon icon={badge} size={dimension > 45 ? 20 : 14}/></span>}
   </span>;
 }
-function PdfGlyph({ dimension, className = '' }: { dimension: number; className?: string }) {
-  return <svg className={`file-glyph pdf-glyph ${className}`} style={{ width: dimension, height: dimension }} viewBox="0 0 64 64" fill="none" aria-hidden="true">
-    <rect x="6" y="6" width="52" height="51" rx="10" fill="#b30b00"/>
-    <path d="M30.3 26.9C26.9 20 27.9 15.8 30.3 16.2C34.6 15.9 31.7 24.3 28.7 31.6C25 40.6 22 46.3 18.9 46.1C12.8 45.8 20 39.2 27.8 36.9C36.3 34 45.1 33.2 47.2 35.6C50.4 40.6 39.5 40.9 30.3 26.9Z" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>;
-}
 function FileGlyph({ entry, dimension = 22 }: { entry: FileEntry; dimension?: number }) {
   const [icon, setIcon] = useState('');
-  const isPDF = !entry.isDirectory && entry.extension === 'pdf';
   const pixels = Math.min(512, Math.max(64, 2 ** Math.ceil(Math.log2(dimension * window.devicePixelRatio))));
   useEffect(() => {
     let live = true;
     if (!entry.isDirectory || entry.name.endsWith('.app')) api.icon(entry.path, pixels).then(value => { if (live) setIcon(value); }).catch(() => { if (live) setIcon(''); });
     return () => { live = false; };
-  }, [entry.path, entry.isDirectory, entry.name, entry.modified, entry.size, pixels]);
+  }, [entry, pixels]);
   if (entry.isDirectory && !entry.name.endsWith('.app')) return <FolderGlyph dimension={dimension} />;
   const style = { width: dimension, height: dimension };
-  if (isPDF) return icon ? <span className="pdf-thumbnail" style={style} aria-hidden="true">
-    <img className="file-glyph" style={style} src={icon} alt="" draggable={false}/>
-    <PdfGlyph dimension={Math.max(10, dimension * .34)} className="pdf-badge"/>
-  </span> : <PdfGlyph dimension={dimension}/>;
   return icon ? <img className="file-glyph" style={style} src={icon} alt="" draggable={false}/> : <FileText className="file-glyph" style={style} strokeWidth={1.2}/>;
 }
 function ToolButton({ label, children, onClick, disabled = false, active = false, className = '' }: { label: string; children: ReactNode; onClick: (event: MouseEvent<HTMLButtonElement>) => void; disabled?: boolean; active?: boolean; className?: string }) {

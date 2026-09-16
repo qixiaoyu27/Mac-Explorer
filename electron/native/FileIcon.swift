@@ -3,6 +3,7 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 import PDFKit
+import QuickLookThumbnailing
 
 // Keep NSWorkspace's multi-resolution icon intact until drawing at the requested
 // physical pixel size. Resizing Electron's 32px bitmap cannot recover this detail.
@@ -21,7 +22,7 @@ func imageThumbnail(_ path: String, pixels: Int) -> NSImage? {
     return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
 }
 
-func render(_ request: Request) throws -> String {
+func render(_ request: Request, officeThumbnail: NSImage? = nil) throws -> String {
     let pixels = min(512, max(32, request.pixels))
     guard request.path.hasPrefix("/"), FileManager.default.fileExists(atPath: request.path) else {
         throw NSError(domain: "FileIcon", code: 1, userInfo: [NSLocalizedDescriptionKey: "文件已不存在"])
@@ -29,13 +30,12 @@ func render(_ request: Request) throws -> String {
     let isPDF = URL(fileURLWithPath: request.path).pathExtension.lowercased() == "pdf"
     let thumbnail: NSImage?
     if isPDF {
-        guard let document = PDFDocument(url: URL(fileURLWithPath: request.path)), !document.isLocked,
-            let page = document.page(at: 0) else {
-            throw NSError(domain: "FileIcon", code: 4, userInfo: [NSLocalizedDescriptionKey: "无法预览 PDF 首页"])
-        }
-        thumbnail = page.thumbnail(of: NSSize(width: pixels, height: pixels), for: .cropBox)
+        if let document = PDFDocument(url: URL(fileURLWithPath: request.path)), !document.isLocked,
+            let page = document.page(at: 0) {
+            thumbnail = page.thumbnail(of: NSSize(width: pixels, height: pixels), for: .cropBox)
+        } else { thumbnail = nil }
     } else {
-        thumbnail = imageThumbnail(request.path, pixels: pixels)
+        thumbnail = officeThumbnail ?? imageThumbnail(request.path, pixels: pixels)
     }
     let icon = thumbnail ?? NSWorkspace.shared.icon(forFile: request.path)
     guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels,
@@ -58,8 +58,23 @@ func render(_ request: Request) throws -> String {
         let width = icon.size.width * scale, height = icon.size.height * scale
         imageBounds = NSRect(x: (bounds.width - width) / 2, y: (bounds.height - height) / 2, width: width, height: height)
     }
+    if officeThumbnail != nil {
+        NSColor.white.setFill()
+        imageBounds.fill()
+        NSColor(white: 0.72, alpha: 1).setStroke()
+        let outline = NSBezierPath(rect: imageBounds.insetBy(dx: 0.5, dy: 0.5))
+        outline.lineWidth = 1
+        outline.stroke()
+    }
     icon.draw(in: imageBounds, from: .zero, operation: .sourceOver, fraction: 1,
         respectFlipped: false, hints: [.interpolation: NSImageInterpolation.high])
+    if thumbnail != nil, let application = NSWorkspace.shared.urlForApplication(toOpen: URL(fileURLWithPath: request.path)) {
+        let badgeSize = CGFloat(pixels) * 0.34
+        NSWorkspace.shared.icon(forFile: application.path).draw(
+            in: NSRect(x: CGFloat(pixels) - badgeSize, y: 0, width: badgeSize, height: badgeSize),
+            from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: false,
+            hints: [.interpolation: NSImageInterpolation.high])
+    }
     // Photographs and transparent artwork must retain their original pixels.
     let cleaned = thumbnail == nil ? stripShadow(bitmap, pixels: pixels) : bitmap
     guard let png = cleaned.representation(using: .png, properties: [:]) else {
@@ -138,11 +153,10 @@ func stripShadow(_ bitmap: NSBitmapImageRep, pixels: Int) -> NSBitmapImageRep {
     return recomposed
 }
 
-while let line = readLine() {
+func respond(_ request: Request, thumbnail: NSImage? = nil) {
     autoreleasepool {
-        guard let data = line.data(using: .utf8), let request = try? JSONDecoder().decode(Request.self, from: data) else { return }
         let response: Response
-        do { response = Response(id: request.id, data: try render(request), error: nil) }
+        do { response = Response(id: request.id, data: try render(request, officeThumbnail: thumbnail), error: nil) }
         catch { response = Response(id: request.id, data: nil, error: error.localizedDescription) }
         if let encoded = try? JSONEncoder().encode(response) {
             FileHandle.standardOutput.write(encoded)
@@ -150,3 +164,32 @@ while let line = readLine() {
         }
     }
 }
+
+// Keep the main run loop available to Quick Look; one slow document must not
+// block normal icons. Accept only content thumbnails, never a generic QL icon.
+let officeExtensions: Set<String> = ["doc", "docx", "xls", "xlsx", "ppt", "pptx"]
+DispatchQueue.global().async {
+    while let line = readLine() {
+        guard let data = line.data(using: .utf8), let request = try? JSONDecoder().decode(Request.self, from: data) else { continue }
+        DispatchQueue.main.async {
+            let url = URL(fileURLWithPath: request.path)
+            guard officeExtensions.contains(url.pathExtension.lowercased()) else { respond(request); return }
+            let pixels = min(512, max(32, request.pixels))
+            let query = QLThumbnailGenerator.Request(fileAt: url, size: CGSize(width: pixels, height: pixels), scale: 1, representationTypes: .thumbnail)
+            var finished = false
+            QLThumbnailGenerator.shared.generateBestRepresentation(for: query) { representation, _ in
+                DispatchQueue.main.async {
+                    guard !finished else { return }; finished = true
+                    respond(request, thumbnail: representation?.type == .thumbnail ? representation?.nsImage : nil)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+                guard !finished else { return }; finished = true
+                QLThumbnailGenerator.shared.cancel(query)
+                respond(request)
+            }
+        }
+    }
+    DispatchQueue.main.async { exit(0) }
+}
+RunLoop.main.run()
