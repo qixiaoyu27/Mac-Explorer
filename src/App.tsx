@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import {
   Archive, ArrowLeft, ArrowRight, ArrowUp, ArrowDownWideNarrow, Check, ChevronDown, ChevronRight,
   ClipboardPaste, Copy, Download, ExternalLink, FilePlus2, FileText, Film, FolderOpen,
@@ -44,8 +44,22 @@ function ViewGlyph({ mode }: { mode: 'extra' | 'large' | 'medium' | 'small' | 'l
   </svg>;
 }
 function FolderGlyph({ dimension = 38, badge }: { dimension?: number; badge?: string }) {
+  const id = useId();
   return <span className="folder-glyph" style={{ width: dimension, height: dimension }} aria-hidden="true">
-    <svg viewBox="0 0 48 44" fill="none"><path d="M3 10a3 3 0 0 1 3-3h12l5 5h19a3 3 0 0 1 3 3v23H3V10Z" fill="#d79b20"/><path d="M3 16h42v20a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V16Z" fill="#ffcb4c"/><path d="M3 16h42v4H3z" fill="#ffdb71"/><path d="M6 39h36" stroke="#dfa629" strokeWidth="1"/></svg>
+    <svg viewBox="0 0 48 44" fill="none">
+      <defs>
+        <linearGradient id={`${id}-back`} x1="12" y1="5" x2="12" y2="18" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#ffc928"/><stop offset="1" stopColor="#efa914"/>
+        </linearGradient>
+        <linearGradient id={`${id}-front`} x1="6" y1="12" x2="40" y2="39" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#ffe79f"/><stop offset="0.5" stopColor="#ffdf75"/><stop offset="1" stopColor="#ffd039"/>
+        </linearGradient>
+      </defs>
+      <path d="M3 8a3 3 0 0 1 3-3h9.3c2.1 0 3.4.6 4.8 2.1L23 10h19.5a2.5 2.5 0 0 1 2.5 2.5V35H3V8Z" fill={`url(#${id}-back)`}/>
+      <path d="M6 10.4h17v5H3.7v-2.3A2.7 2.7 0 0 1 6 10.4Z" fill="#fff8df"/>
+      <path d="M5.4 12.7h10.3c2.9 0 4.1-2.7 7-2.7h19.9a2.4 2.4 0 0 1 2.4 2.4v23.2a2.4 2.4 0 0 1-2.4 2.4H5.4A2.4 2.4 0 0 1 3 35.6V15.1a2.4 2.4 0 0 1 2.4-2.4Z" fill={`url(#${id}-front)`} stroke="#d7a92c" strokeOpacity=".65" strokeWidth=".45"/>
+      <path d="M5.6 13.15h10.1c2.9 0 4.2-2.7 7-2.7h19.7" stroke="#fff3c3" strokeOpacity=".8" strokeWidth=".4" strokeLinecap="round"/>
+    </svg>
     {badge && <span className={`folder-badge badge-${badge}`}><PlaceIcon icon={badge} size={dimension > 45 ? 20 : 14}/></span>}
   </span>;
 }
