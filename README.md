@@ -63,7 +63,7 @@ xattr -dr com.apple.quarantine "/Applications/Mac Explorer.app"
 每次发布附带 `SHA256SUMS.txt`。在下载目录运行以下命令，并将输出与同一 Release 中的校验文件对照：
 
 ```sh
-shasum -a 256 Mac-Explorer-0.1.26-mac-arm64.dmg
+shasum -a 256 Mac-Explorer-0.1.27-mac-arm64.dmg
 ```
 
 使用 ZIP 时，对 ZIP 文件执行相同校验即可。

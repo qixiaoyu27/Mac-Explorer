@@ -302,13 +302,34 @@ function createWindow() {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+  window.webContents.on('context-menu', (_event, params) => {
+    if (!params.isEditable || !window) return;
+    Menu.buildFromTemplate([
+      { role: 'undo', label: '撤销', enabled: params.editFlags.canUndo },
+      { type: 'separator' },
+      { role: 'cut', label: '剪切', enabled: params.editFlags.canCut },
+      { role: 'copy', label: '复制', enabled: params.editFlags.canCopy },
+      { role: 'paste', label: '粘贴', enabled: params.editFlags.canPaste },
+      { role: 'selectAll', label: '全选' },
+    ]).popup({ window });
+  });
   window.once('ready-to-show', () => { if (!(testRoot && process.env.EXPLORER_TEST_HIDDEN === '1')) window?.show(); });
   if (isDev) window.loadURL('http://127.0.0.1:5173/');
   else window.loadFile(path.join(__dirname, '../dist/index.html'));
   window.on('close', event => { if (extracting) event.preventDefault(); });
   window.on('closed', () => { window = null; watcher?.close(); searchController?.abort(); });
 }
-const action = (name: string) => () => window?.webContents.send('action', name);
+const action = (name: string) => async () => {
+  const contents = window?.webContents;
+  if (!contents || contents.isDestroyed()) return;
+  const edits = { copy: () => contents.copy(), cut: () => contents.cut(), paste: () => contents.paste(), 'select-all': () => contents.selectAll(), undo: () => contents.undo() };
+  if (name in edits) {
+    const editable = await contents.executeJavaScript('document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement || document.activeElement?.isContentEditable === true');
+    if (contents.isDestroyed()) return;
+    if (editable) { edits[name as keyof typeof edits](); return; }
+  }
+  contents.send('action', name);
+};
 app.whenReady().then(async () => {
   // Set native and renderer appearance before the first window is created.
   nativeTheme.themeSource = 'light';

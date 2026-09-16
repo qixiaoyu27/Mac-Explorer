@@ -230,8 +230,8 @@ export default function App() {
   }, []);
 
   const places = useMemo<Place[]>(() => [...(boot?.places || []).filter(place => !unpinnedDefaults.includes(place.path)), ...pins.filter(p => !boot?.places.some(place => place.path === p)).map(p => ({ path: p, name: base(p), icon: 'folder' }))], [boot, pins, unpinnedDefaults]);
-  const label = useCallback((value: string) => value === PC ? '此电脑' : !value || value === boot?.home ? '个人文件夹' : boot?.places.find(p => p.path === value)?.name || places.find(p => p.path === value)?.name || base(value), [boot, places]);
-  const displayName = (entry: FileEntry) => extensions || entry.isDirectory || !entry.extension ? entry.name : entry.name.slice(0, -(entry.extension.length + 1));
+  const label = useCallback((value: string) => value === '/Applications' || value === `${boot?.home}/Applications` ? '应用程序' : value === PC ? '此电脑' : !value || value === boot?.home ? '个人文件夹' : boot?.places.find(p => p.path === value)?.name || places.find(p => p.path === value)?.name || base(value), [boot, places]);
+  const displayName = (entry: FileEntry) => entry.isDirectory && /\.app$/i.test(entry.name) ? entry.name.slice(0, -4) : extensions || entry.isDirectory || !entry.extension ? entry.name : entry.name.slice(0, -(entry.extension.length + 1));
   const visible = useMemo(() => {
     const items = entries.filter(e => hidden || !e.hidden || revealedPaths.includes(e.path));
     return items.sort((a, b) => {
@@ -540,11 +540,7 @@ export default function App() {
   const actions = useRef<(action: string) => void>(() => {});
   actions.current = action => {
     if (modal) return;
-    if (document.activeElement instanceof HTMLInputElement) {
-      const command = ({ copy: 'copy', cut: 'cut', paste: 'paste', 'select-all': 'selectAll', undo: 'undo' } as Record<string, string>)[action];
-      if (command) document.execCommand(command);
-      return;
-    }
+    if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) return;
     if (action === 'new-tab') newTab(); if (action === 'choose-folder') chooseFolder();
     if (action === 'new-folder') create(true); if (action === 'refresh') setRefresh(v => v + 1);
     if (action === 'hidden') setHidden(v => !v);
@@ -728,7 +724,7 @@ export default function App() {
         </div>
         <div className="nav-divider"/>
         <div className="sidebar-section" aria-label="快速访问">
-          {places.map(place => <NavigationTree key={place.path} place={place} location={location} hidden={hidden} pinned navigate={navigate} newTab={newTab} drop={drop}
+          {places.map(place => <NavigationTree key={place.path} place={{ ...place, name: label(place.path) }} location={location} hidden={hidden} pinned navigate={navigate} newTab={newTab} drop={drop}
             context={(event, target) => menuAt(event, [{ label: '在新标签页中打开', icon: <Plus/>, action: () => newTab(target.path) }, terminalItem(target.path), { label: places.some(place => place.path === target.path) ? '从快速访问取消固定' : '固定到快速访问', icon: <Pin/>, action: () => togglePin(target.path) }])}/>)}
         </div>
         <div className="nav-divider"/>
