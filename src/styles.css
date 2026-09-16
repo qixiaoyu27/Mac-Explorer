@@ -369,3 +369,28 @@ h2 { font-weight: 500; }
 
 .selection-marquee { position: absolute; pointer-events: none; z-index: 5; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .marquee-selecting .icon-grid:not(.small-icons) .file-row.selected .entry-name { -webkit-line-clamp: 2; }
+
+/* Fluent feedback: fixed hit targets and no per-file animation queues. */
+button, .tab, .file-row, .archive-row {
+  transition: background-color var(--motion-fast) linear, color var(--motion-fast) linear;
+}
+.item-checkbox { transition: opacity var(--motion-fast) linear; }
+.tab { animation: surface-appear var(--motion-normal) var(--motion-enter); }
+/* Opacity keeps menu positioning measurements and edge clamping exact. */
+.context-menu { animation: surface-appear var(--motion-normal) var(--motion-enter); }
+.modal[open] { animation: dialog-enter var(--motion-pane) var(--motion-enter); }
+.modal[open]::backdrop { animation: surface-appear var(--motion-normal) linear; }
+.details-pane { animation: pane-enter var(--motion-pane) var(--motion-enter); }
+.sidebar { animation: surface-appear var(--motion-normal) var(--motion-enter); }
+.tree-node > [role="group"] { animation: surface-appear var(--motion-normal) var(--motion-enter); }
+.tree-toggle > svg:not(.spinning) { transition: transform var(--motion-normal) var(--motion-enter); }
+.tree-toggle[aria-expanded="true"] > svg:not(.spinning) { transform: rotate(90deg); }
+@keyframes surface-appear { from { opacity: .35; } to { opacity: 1; } }
+@keyframes dialog-enter { from { opacity: .35; transform: scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes pane-enter { from { opacity: .35; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+.trash-confirmation-preference { display: flex; align-items: center; gap: 8px; margin: -8px 0 22px; font-size: 12px; }
+.trash-confirmation-preference input[type="checkbox"] { width: 16px; height: 16px; margin: 0; padding: 0; accent-color: var(--accent); }

@@ -16,3 +16,7 @@ The user's reference is binding: reproduce Windows 11 File Explorer in Operate m
 - Small icons use horizontal labels; list fills downward into columns; tiles show type/size; content adds date/location. Show settings and mutually exclusive panes persist without resetting navigation or pins.
 
 - More → Appearance offers Light, Dark, and System. Preserve light appearance for existing installs until selected; persist nativeTheme before window creation. Dark uses #191919 file surfaces, #202020 navigation, #242424 menus/toolbars, readable neutral text, and #70c5ff accents. Never invert file icons or change system settings.
+
+## Motion
+
+Follow Fluent timing: 83ms for hover/selection color, 167ms for menus, tabs and loaded file views, and 250ms for dialogs and right-side panes. Use `cubic-bezier(0, 0, 0, 1)` for arrivals. Navigation moves the file surface just 4px; panes enter 12px from the right. Never stagger individual files or delay an operation for animation. Cancel interrupted navigation animations, retain focus/scroll/selection, and skip motion when Reduce Motion is enabled. Menus dismiss immediately so actions remain responsive.

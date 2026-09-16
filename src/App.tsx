@@ -182,6 +182,19 @@ export default function App() {
   }).catch(e => { setError(errorMessage(e)); setLoading(false); }); }, []);
   useEffect(() => { for (const [key, value] of Object.entries({ view, iconSize, sort, ascending, hidden, extensions, details, previewPane, navigationPane, compact, checkboxes, pins, unpinnedDefaults, recent })) localStorage.setItem(key, JSON.stringify(value)); }, [view, iconSize, sort, ascending, hidden, extensions, details, previewPane, navigationPane, compact, checkboxes, pins, unpinnedDefaults, recent]);
   useEffect(() => { if (boot) localStorage.setItem('tabs', JSON.stringify(tabs.map(t => t.location))); }, [tabs, boot]);
+  // Animate the existing surface, preserving focus, selection, and scroll state.
+  useEffect(() => {
+    if (loading || loadedLocation.current !== location) return;
+    const surface = contentRef.current?.querySelector<HTMLElement>('.file-items, .computer-content, .empty-state');
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (!surface || reduced.matches) return;
+    const animation = surface.animate([{ opacity: .65, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], {
+      duration: 167, easing: 'cubic-bezier(0, 0, 0, 1)',
+    });
+    const cancel = () => animation.cancel();
+    reduced.addEventListener('change', cancel);
+    return () => { cancel(); reduced.removeEventListener('change', cancel); };
+  }, [loading, location, activeID, view]);
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 4500); return () => clearTimeout(timer); }, [toast]);
   useEffect(() => {
     if (!boot) return;
@@ -313,12 +326,23 @@ export default function App() {
     }, '已重命名');
     if (success) { setEditingName(null); contentRef.current?.focus(); }
   }
-  function trash(paths = [...selected]) { if (paths.length) showModal({ kind: 'trash', paths }); }
-  async function submitModal() {
+  async function moveToTrash(paths: string[]) {
+    report(await api.trash(paths), '已移到废纸篓');
+    setSelected(new Set());
+  }
+  function trash(paths = [...selected]) {
+    if (!paths.length || operationLock.current) return;
+    if (stored('skipTrashConfirmation', false)) void run('正在移到废纸篓…', () => moveToTrash(paths));
+    else showModal({ kind: 'trash', paths });
+  }
+  async function submitModal(skipTrashConfirmation = false) {
     if (!modal || (modal.kind === 'shortcuts' || modal.kind === 'archive') || operationLock.current) return;
     operationLock.current = true; setOperation('正在处理…'); setModalError('');
     try {
-      if (modal.kind === 'trash') { report(await api.trash(modal.paths), '已移到废纸篓'); setSelected(new Set()); }
+      if (modal.kind === 'trash') {
+        await moveToTrash(modal.paths);
+        if (skipTrashConfirmation) localStorage.setItem('skipTrashConfirmation', 'true');
+      }
       else {
         const result = modal.kind === 'rename' ? await api.rename(modal.path, modalValue) : await api.create(modal.path, modalValue, modal.kind === 'folder');
         setSelected(new Set([result])); setRefresh(v => v + 1);
@@ -873,7 +897,7 @@ function NavigationTree({ place, location, hidden, navigate, newTab, drop, conte
   }, [expanded, place.path, hidden, location]);
   return <div className="tree-node">
     <div className={`tree-row ${location === place.path ? 'current' : ''} ${over ? 'drop-target' : ''}`} onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setOver(true); }} onDragLeave={() => setOver(false)} onDrop={event => { setOver(false); drop(event, place.path); }}>
-      <button className="tree-toggle" style={{ left: 1 + level * 12 }} aria-label={`${expanded ? '折叠' : '展开'} ${place.name}`} aria-expanded={expanded} onClick={() => setExpanded(v => !v)}>{loading ? <Loader2 size={11} className="spinning"/> : expanded ? <ChevronDown size={11}/> : <ChevronRight size={11}/>}</button>
+      <button className="tree-toggle" style={{ left: 1 + level * 12 }} aria-label={`${expanded ? '折叠' : '展开'} ${place.name}`} aria-expanded={expanded} onClick={() => setExpanded(v => !v)}>{loading ? <Loader2 size={11} className="spinning"/> : <ChevronRight size={11}/>}</button>
       <button className={`nav-item ${location === place.path ? 'current' : ''}`} style={{ paddingLeft: 24 + level * 12 }} onClick={() => navigate(place.path)} onAuxClick={event => { if (event.button === 1) newTab(place.path); }} onContextMenu={event => context(event, place)}>
         {place.icon === 'folder' ? <FolderGlyph dimension={20}/> : <PlaceIcon icon={place.icon}/>}<span>{place.name}</span>{pinned && <Pin size={12} className="pin-mark"/>}
       </button>
@@ -881,7 +905,8 @@ function NavigationTree({ place, location, hidden, navigate, newTab, drop, conte
     {expanded && <div role="group" aria-label={`${place.name} 的子文件夹`}>{error ? <p className="tree-note" title={error}>无法访问</p> : !loading && !children.length ? <p className="tree-note">没有子文件夹</p> : children.map(child => <NavigationTree key={child.path} place={{ path: child.path, name: child.name, icon: 'folder' }} location={location} hidden={hidden} navigate={navigate} newTab={newTab} drop={drop} context={context} level={Math.min(level + 1, 6)}/>)}</div>}
   </div>;
 }
-function ModalDialog({ modal, value, onChange, error, busy, onClose, onSubmit }: { modal: Exclude<Modal, { kind: 'archive' }>; value: string; onChange: (value: string) => void; error: string; busy: boolean; onClose: () => void; onSubmit: () => void }) {
+function ModalDialog({ modal, value, onChange, error, busy, onClose, onSubmit }: { modal: Exclude<Modal, { kind: 'archive' }>; value: string; onChange: (value: string) => void; error: string; busy: boolean; onClose: () => void; onSubmit: (skipTrashConfirmation?: boolean) => void }) {
+  const [skipTrashConfirmation, setSkipTrashConfirmation] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null); const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     dialogRef.current?.showModal();
@@ -890,8 +915,9 @@ function ModalDialog({ modal, value, onChange, error, busy, onClose, onSubmit }:
   }, []);
   const title = modal.kind === 'trash' ? '移到废纸篓' : modal.kind === 'rename' ? '重命名' : modal.kind === 'folder' ? '新建文件夹' : modal.kind === 'file' ? '新建文本文档' : '键盘快捷键';
   return <dialog ref={dialogRef} className={`modal ${modal.kind === 'shortcuts' ? 'shortcut-modal' : ''}`} aria-labelledby="modal-title" onCancel={event => { event.preventDefault(); onClose(); }} onClose={onClose}>
-    <form onSubmit={event => { event.preventDefault(); onSubmit(); }}><div className="modal-heading"><h2 id="modal-title">{title}</h2><button type="button" aria-label="关闭对话框" onClick={onClose} disabled={busy}><X size={18}/></button></div>
+    <form onSubmit={event => { event.preventDefault(); onSubmit(modal.kind === 'trash' && skipTrashConfirmation); }}><div className="modal-heading"><h2 id="modal-title">{title}</h2><button type="button" aria-label="关闭对话框" onClick={onClose} disabled={busy}><X size={18}/></button></div>
       {modal.kind === 'shortcuts' ? <><p className="shortcut-note">文件操作遵循 macOS 访达的常用快捷键。</p><div className="shortcut-list">{[['重命名', 'Return'], ['打开项目', '⌘O / ⌘↓'], ['复制 / 粘贴 / 撤销', '⌘C / ⌘V / ⌘Z'], ['移动已复制的文件', '⌥⌘V'], ['创建副本', '⌘D'], ['全选 / 新建文件夹', '⌘A / ⇧⌘N'], ['移到废纸篓', '⌘⌫'], ['快速查看', 'Space / ⌘Y'], ['后退 / 前进 / 上一级', '⌘[ / ⌘] / Backspace 或 ⌘↑'], ['前往文件夹 / 搜索', '⇧⌘G / ⌘F'], ['新建 / 关闭标签页', '⌘T / ⌘W'], ['切换标签页', '⌃Tab / ⌃⇧Tab'], ['图标 / 详细信息视图', '⌘1 / ⌘2'], ['预览窗格 / 隐藏项目', '⇧⌘P / ⇧⌘.'], ['详细信息窗格', '⌘I']].map(([name, keys]) => <div key={name}><span>{name}</span><kbd>{keys}</kbd></div>)}</div><p className="shortcut-note">移动文件：先 ⌘C，再到目标文件夹按 ⌥⌘V。保留 Ctrl+C / X / V、F2、F5 等兼容快捷键；输入框内沿用文本编辑快捷键。</p></> : modal.kind === 'trash' ? <div className="trash-description"><Trash2 size={34} strokeWidth={1.4}/><div><p>将{modal.paths.length === 1 ? `“${base(modal.paths[0])}”` : `这 ${modal.paths.length} 个项目`}移到废纸篓？</p><small>文件将移入 macOS 废纸篓，你可以从那里恢复。</small></div></div> : <><label className="name-label" htmlFor="entry-name">名称</label><input ref={inputRef} id="entry-name" value={value} onChange={event => onChange(event.target.value)} disabled={busy} autoComplete="off"/><p className="modal-location">位置：{modal.kind === 'rename' ? parent(modal.path) : modal.path}</p></>}
+      {modal.kind === 'trash' && <label className="trash-confirmation-preference"><input type="checkbox" checked={skipTrashConfirmation} disabled={busy} onChange={event => setSkipTrashConfirmation(event.target.checked)}/>不再显示此提示</label>}
       {error && <p className="modal-error" role="alert">{error}</p>}
       <div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>{modal.kind === 'shortcuts' ? '知道了' : '取消'}</button>{modal.kind !== 'shortcuts' && <button type="submit" className="primary-button" disabled={busy || modal.kind !== 'trash' && !value.trim()}>{busy ? '正在处理…' : modal.kind === 'trash' ? '移到废纸篓' : '确定'}</button>}</div>
     </form>

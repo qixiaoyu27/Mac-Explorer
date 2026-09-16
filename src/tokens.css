@@ -1,4 +1,8 @@
 :root {
+  --motion-fast: 83ms;
+  --motion-normal: 167ms;
+  --motion-pane: 250ms;
+  --motion-enter: cubic-bezier(0, 0, 0, 1);
   color-scheme: light;
   --text: #242424;
   --surface: #ffffff;
