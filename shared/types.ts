@@ -19,7 +19,7 @@ export interface ExplorerAPI {
   takeOpenPaths(): Promise<string[]>;
   onOpenPaths(callback: () => void): () => void;
   setTheme(mode: ThemeMode): Promise<ThemeMode>;
-  list(path: string): Promise<Listing>;
+  list(path: string, refreshIcons?: boolean): Promise<Listing>;
   search(path: string, query: string, hidden: boolean): Promise<SearchResult>;
   cancelSearch(): Promise<void>;
   open(path: string): Promise<ArchivePreview | null>;

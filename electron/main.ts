@@ -121,7 +121,11 @@ ipc('set-theme', async (mode: unknown) => {
   window?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#191919' : '#ffffff');
   return mode;
 });
-ipc('list', (input: string) => { fileIcons.clearCache(); return listDirectory(absolute(input)); });
+ipc('list', (input: string, refreshIcons: unknown = false) => {
+  const directory = absolute(input);
+  if (refreshIcons === true) fileIcons.clearCache();
+  return listDirectory(directory);
+});
 ipc('search', async (input: string, query: string, hidden: boolean) => {
   searchController?.abort();
   searchController = new AbortController();

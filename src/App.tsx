@@ -112,6 +112,8 @@ export default function App() {
   const [editingAddress, setEditingAddress] = useState(false);
   const [address, setAddress] = useState('');
   const [refresh, setRefresh] = useState(0);
+  const refreshIcons = useRef(false);
+  function refreshDirectory() { refreshIcons.current = true; setRefresh(v => v + 1); }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [operation, setOperation] = useState('');
@@ -196,7 +198,8 @@ export default function App() {
         return result.entries;
       }
       if (location === PC) return [];
-      return (await api.list(location)).entries;
+      const forceIcons = refreshIcons.current; refreshIcons.current = false;
+      return (await api.list(location, forceIcons)).entries;
     };
     load().then(items => {
       if (version !== generation.current) return;
@@ -471,7 +474,7 @@ export default function App() {
       { label: '粘贴', icon: <ClipboardPaste/>, shortcut: '⌘V', divider: true, disabled: !writable || !clipboard.paths.length, action: () => paste() },
       { label: '将项目移到这里', shortcut: '⌥⌘V', disabled: !writable || !clipboard.paths.length, action: () => paste(true) },
       { label: undoLabel ? `撤销${undoLabel}` : '撤销', icon: <Undo2/>, shortcut: '⌘Z', disabled: !undoLabel, action: undo },
-      { label: '刷新', icon: <RotateCw/>, shortcut: 'F5', action: () => setRefresh(v => v + 1) },
+      { label: '刷新', icon: <RotateCw/>, shortcut: 'F5', action: refreshDirectory },
       { label: '显示隐藏的项目', checked: hidden, divider: true, action: () => setHidden(v => !v) },
       { label: '打开文件夹…', icon: <FolderOpen/>, action: chooseFolder },
       ...(!isVirtual(location) ? [terminalItem(location)] : []),
@@ -531,7 +534,7 @@ export default function App() {
     if (modal) return;
     if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) return;
     if (action === 'new-tab') newTab(); if (action === 'choose-folder') chooseFolder();
-    if (action === 'new-folder') create(true); if (action === 'refresh') setRefresh(v => v + 1);
+    if (action === 'new-folder') create(true); if (action === 'refresh') refreshDirectory();
     if (action === 'hidden') setHidden(v => !v);
     if (action === 'close-tab') closeTab(tab.id); if (action === 'copy') copy(false);
     if (action === 'paste') paste(); if (action === 'move-here') paste(true); if (action === 'undo') undo(); if (action === 'select-all') setSelected(new Set(visible.map(e => e.path)));
@@ -587,7 +590,7 @@ export default function App() {
       else if (ctrl && key === 'i' || event.altKey && key === 'enter') { event.preventDefault(); toggleDetails(); }
       else if (ctrl && key === 'tab') { event.preventDefault(); const index = tabs.findIndex(t => t.id === tab.id); setActiveID(tabs[(index + (event.shiftKey ? tabs.length - 1 : 1)) % tabs.length].id); resetNavigation(); }
       else if (key === 'f2') { event.preventDefault(); rename(); }
-      else if (key === 'f5' || ctrl && key === 'r') { event.preventDefault(); setRefresh(v => v + 1); }
+      else if (key === 'f5' || ctrl && key === 'r') { event.preventDefault(); refreshDirectory(); }
       else if (event.altKey && key === 'arrowleft') { event.preventDefault(); historyGo(-1); }
       else if (event.altKey && key === 'arrowright') { event.preventDefault(); historyGo(1); }
       else if (event.altKey && key === 'arrowup' || key === 'backspace' && !ctrl && !event.altKey && !event.shiftKey) { event.preventDefault(); if (!isVirtual(location) && location !== '/') navigate(parent(location)); }
@@ -665,7 +668,7 @@ export default function App() {
         <ToolButton label="后退 (⌘[)" disabled={tab.index === 0} onClick={() => historyGo(-1)}><ArrowLeft/></ToolButton>
         <ToolButton label="前进 (⌘])" disabled={tab.index >= tab.history.length - 1} onClick={() => historyGo(1)}><ArrowRight/></ToolButton>
         <ToolButton label="向上一级 (Backspace / ⌘↑)" disabled={isVirtual(location) || location === '/'} onClick={() => navigate(parent(location))}><ArrowUp/></ToolButton>
-        <ToolButton label="刷新 (F5)" onClick={() => setRefresh(v => v + 1)}><RotateCw className={loading ? 'spinning' : ''}/></ToolButton>
+        <ToolButton label="刷新 (F5)" onClick={refreshDirectory}><RotateCw className={loading ? 'spinning' : ''}/></ToolButton>
       </div>
       <div className={`address-bar ${editingAddress ? 'editing' : ''}`} onClick={editAddress}>
         <span className="address-icon"><PlaceIcon icon={isVirtual(location) ? location : 'folder'} size={17}/></span>

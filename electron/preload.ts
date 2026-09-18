@@ -6,7 +6,7 @@ const api: ExplorerAPI = {
   takeOpenPaths: () => ipcRenderer.invoke('take-open-paths'),
   onOpenPaths: callback => { const listener = () => callback(); ipcRenderer.on('open-paths', listener); return () => ipcRenderer.removeListener('open-paths', listener); },
   setTheme: mode => ipcRenderer.invoke('set-theme', mode),
-  list: path => ipcRenderer.invoke('list', path),
+  list: (path, refreshIcons) => ipcRenderer.invoke('list', path, refreshIcons),
   search: (path, query, hidden) => ipcRenderer.invoke('search', path, query, hidden),
   cancelSearch: () => ipcRenderer.invoke('cancel-search'),
   open: path => ipcRenderer.invoke('open', path),
