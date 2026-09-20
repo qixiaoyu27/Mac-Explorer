@@ -25,6 +25,23 @@ Mac Explorer 面向习惯 Windows 文件资源管理器的 Mac 用户：熟悉�
 
 ## 下载与安装
 
+### 一行命令安装（推荐）
+
+打开 macOS 的「终端」，复制并执行：
+
+```sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/main/scripts/install.sh)"
+```
+
+无需安装 npm、Node.js 或 Homebrew，也不需要 `sudo`。命令会下载并运行[本仓库的安装脚本](scripts/install.sh)，自动获取最新版本、校验 SHA-256 和应用签名，安装后启动应用。
+
+- 首次默认安装到个人应用程序目录 `~/Applications`；若已有 `/Applications/Mac Explorer.app`，则在该位置更新，需要目录可写。
+- 更新时先退出 Mac Explorer，再执行同一命令。旧版本备份在安装目录的 `.Mac Explorer Backups` 中，已有偏好设置保留。
+- 一键安装不会补上 Apple 公证，也不会关闭 Gatekeeper 或移除隔离标记。如被系统拦截，请参考下方首次打开说明。
+- GitHub 连接失败时可重试，或使用下面的手动下载安装方式。
+
+### 手动下载安装
+
 1. 前往 **[Releases](https://github.com/qixiaoyu27/Mac-Explorer/releases/latest)**，下载 `Mac-Explorer-版本号-mac-arm64.dmg`。
 2. 打开 DMG，将 **Mac Explorer** 拖入 **Applications**。
 3. 启动应用，按需允许访问桌面、文档或下载文件夹。
