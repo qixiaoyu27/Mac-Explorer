@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { archiveFolderName, isArchive } from '../shared/archives';
-import type { ExtractMode, ArchivePreview, Bootstrap, ClipboardInfo, FileEntry, OperationResult, Place, Preview, ThemeMode } from '../shared/types';
+import type { ExtractMode, ArchivePreview, Bootstrap, ClipboardInfo, FileEntry, OperationResult, Place, Preview, ThemeMode, Volume } from '../shared/types';
 
 const api = window.explorer;
 const PC = 'computer';
@@ -35,6 +35,10 @@ function type(entry: FileEntry) {
   return names[entry.extension] || (entry.extension ? `${entry.extension.toUpperCase()} 文件` : '文件');
 }
 function errorMessage(error: unknown) { return String(error instanceof Error ? error.message : error).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
+
+function Eject({ size = 16 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 2 1.5 10h13L8 2Z"/><rect x="2" y="12" width="12" height="2" rx="0.5"/></svg>;
+}
 
 function PlaceIcon({ icon, size: dimension = 18 }: { icon: string; size?: number }) {
   const Component = ({ trash: Trash2, star: Star, desktop: Monitor, download: Download, document: FileText, image: Image, music: Music2, video: Film, drive: HardDrive, folder: FolderOpen, computer: Monitor } as Record<string, typeof FolderOpen>)[icon] || FolderOpen;
@@ -118,7 +122,7 @@ export default function App() {
   const [address, setAddress] = useState('');
   const [refresh, setRefresh] = useState(0);
   const refreshIcons = useRef(false);
-  function refreshDirectory() { refreshIcons.current = true; setRefresh(v => v + 1); }
+  function refreshDirectory() { refreshIcons.current = true; setRefresh(v => v + 1); void api.volumes().then(volumes => setBoot(previous => previous ? { ...previous, volumes } : previous)).catch(() => {}); }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [operation, setOperation] = useState('');
@@ -352,6 +356,29 @@ export default function App() {
     if (stored('skipTrashConfirmation', false)) void run('正在移到废纸篓…', () => moveToTrash(paths));
     else showModal({ kind: 'trash', paths });
   }
+  function ejectVolume(volume: Volume) {
+    void run(`正在推出“${volume.name}”…`, async () => {
+      const volumes = await api.ejectVolume(volume.path);
+      const removed = (boot?.volumes || []).filter(old => !volumes.some(next => next.path === old.path));
+      const unavailable = (value: string) => removed.some(old => value === old.path || value.startsWith(old.path + '/'));
+      const home = boot?.home || '/';
+      setBoot(previous => previous ? { ...previous, volumes } : previous);
+      setTabs(previous => previous.map(tab => {
+        if (!unavailable(tab.location) && !tab.history.some(unavailable)) return tab;
+        const remaining = tab.history.filter(value => !unavailable(value));
+        const current = unavailable(tab.location) ? home : tab.location;
+        const index = unavailable(tab.location) ? -1 : tab.history.slice(0, tab.index + 1).filter(value => !unavailable(value)).length - 1;
+        return { ...tab, location: current, history: index < 0 ? [...remaining, current] : remaining, index: index < 0 ? remaining.length : index };
+      }));
+      if (unavailable(location)) resetNavigation();
+      setRefresh(value => value + 1);
+    }, `已推出“${volume.name}”`);
+  }
+  useEffect(() => {
+    const refreshVolumes = () => { void api.volumes().then(volumes => setBoot(previous => previous ? { ...previous, volumes } : previous)).catch(() => {}); };
+    window.addEventListener('focus', refreshVolumes);
+    return () => window.removeEventListener('focus', refreshVolumes);
+  }, []);
   function restoreTrash(paths = [...selected], choose = false) {
     if (!paths.length) return;
     void run('正在还原…', async () => {
@@ -855,7 +882,7 @@ export default function App() {
         </div>
         <div className="nav-divider"/>
         <button className={`nav-item parent-nav ${location === PC ? 'current' : ''}`} onClick={() => navigate(PC)}><ChevronDown className="nav-chevron" size={12}/><PlaceIcon icon="computer"/><span>此电脑</span></button>
-        {boot?.volumes.map(volume => <NavigationTree key={volume.path} place={volume} location={location} hidden={hidden} navigate={navigate} newTab={newTab} drop={drop} level={1} context={(event, target) => menuAt(event, [{ label: '在新标签页中打开', icon: <Plus/>, action: () => newTab(target.path) }, terminalItem(target.path)])}/>)}
+        {boot?.volumes.map(volume => <NavigationTree key={volume.path} place={volume} location={location} hidden={hidden} navigate={navigate} newTab={newTab} drop={drop} level={1} eject={volume.canEject ? () => ejectVolume(volume) : undefined} ejecting={!!operation} context={(event, target) => menuAt(event, [{ label: '在新标签页中打开', icon: <Plus/>, action: () => newTab(target.path) }, terminalItem(target.path), ...(volume.canEject && target.path === volume.path ? [{ label: `推出“${volume.name}”`, icon: <Eject/>, disabled: !!operation, action: () => ejectVolume(volume) }] : [])])}/>)}
       </nav>}
 
       <main className={`main-pane ${details || previewPane ? 'has-details' : ''}`}>
@@ -867,7 +894,7 @@ export default function App() {
           onPointerDown={startMarquee} onClickCapture={event => { if (suppressMarqueeClick.current) { event.preventDefault(); event.stopPropagation(); suppressMarqueeClick.current = false; } }}
           onContextMenu={event => contextMenu(event)}
           onDragOver={event => { if (writable) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDragOver(location); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragOver(null); }} onDrop={event => drop(event, location)}>
-          {location === PC && !submittedQuery ? <div className="computer-content"><h2><ChevronDown size={14}/>设备和驱动器（{boot?.volumes.length || 0}）</h2><div className="drive-grid">{boot?.volumes.map(volume => <button className="drive-card" key={volume.path} onDoubleClick={() => navigate(volume.path)} onKeyDown={event => { if (event.key === 'Enter') navigate(volume.path); }}><HardDrive size={49} strokeWidth={1.2}/><span><strong>{volume.name}</strong><span className="storage-track"><span style={{ width: `${Math.max(0, Math.min(100, (1 - volume.free / volume.total) * 100))}%` }}/></span><small>{size(volume.free)} 可用，共 {size(volume.total)}</small></span></button>)}</div></div> : loading ? <Loading/> : visible.length ? fileRows() : <div className="empty-state">{submittedQuery ? <Search size={42} strokeWidth={1.2}/> : <FolderGlyph dimension={68}/>}<h2>{error ? '无法显示此位置' : submittedQuery ? '没有找到匹配的项目' : viewingTrash ? '废纸篓为空' : '此文件夹为空'}</h2><p>{error ? '检查访问权限，或返回上一个文件夹。' : submittedQuery ? '尝试其他名称，或到上一级文件夹中搜索。' : viewingTrash ? '这里显示废纸篓中的项目。' : '将文件拖到这里，或使用“新建”创建文件夹。'}</p>{error && <button className="secondary-button" onClick={() => setRefresh(v => v + 1)}>重试</button>}</div>}
+          {location === PC && !submittedQuery ? <div className="computer-content"><h2><ChevronDown size={14}/>设备和驱动器（{boot?.volumes.length || 0}）</h2><div className="drive-grid">{boot?.volumes.map(volume => <button className="drive-card" key={volume.path} onContextMenu={event => menuAt(event, [{ label: '打开', action: () => navigate(volume.path) }, ...(volume.canEject ? [{ label: `推出“${volume.name}”`, icon: <Eject/>, disabled: !!operation, action: () => ejectVolume(volume) }] : [])])} onDoubleClick={() => navigate(volume.path)} onKeyDown={event => { if (event.key === 'Enter') navigate(volume.path); }}><HardDrive size={49} strokeWidth={1.2}/><span><strong>{volume.name}</strong><span className="storage-track"><span style={{ width: `${Math.max(0, Math.min(100, (1 - volume.free / volume.total) * 100))}%` }}/></span><small>{size(volume.free)} 可用，共 {size(volume.total)}</small></span></button>)}</div></div> : loading ? <Loading/> : visible.length ? fileRows() : <div className="empty-state">{submittedQuery ? <Search size={42} strokeWidth={1.2}/> : <FolderGlyph dimension={68}/>}<h2>{error ? '无法显示此位置' : submittedQuery ? '没有找到匹配的项目' : viewingTrash ? '废纸篓为空' : '此文件夹为空'}</h2><p>{error ? '检查访问权限，或返回上一个文件夹。' : submittedQuery ? '尝试其他名称，或到上一级文件夹中搜索。' : viewingTrash ? '这里显示废纸篓中的项目。' : '将文件拖到这里，或使用“新建”创建文件夹。'}</p>{error && <button className="secondary-button" onClick={() => setRefresh(v => v + 1)}>重试</button>}</div>}
           {selectionBox && <div className="selection-marquee" style={selectionBox} aria-hidden="true"/>}
         </div>
       </main>
@@ -1008,9 +1035,9 @@ function InlineName({ name, directory, onSave, onCancel }: { name: string; direc
   }}/>;
 }
 
-function NavigationTree({ place, location, hidden, navigate, newTab, drop, context, pinned = false, level = 0 }: {
+function NavigationTree({ place, location, hidden, navigate, newTab, drop, context, pinned = false, level = 0, eject, ejecting = false }: {
   place: Place; location: string; hidden: boolean; navigate: (path: string) => void; newTab: (path: string) => void;
-  drop: (event: React.DragEvent, path: string) => void; context: (event: MouseEvent, place: Place) => void; pinned?: boolean; level?: number;
+  drop: (event: React.DragEvent, path: string) => void; context: (event: MouseEvent, place: Place) => void; pinned?: boolean; level?: number; eject?: () => void; ejecting?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false); const [children, setChildren] = useState<FileEntry[]>([]); const [loading, setLoading] = useState(false); const [error, setError] = useState(''); const [over, setOver] = useState(false);
   useEffect(() => {
@@ -1022,9 +1049,10 @@ function NavigationTree({ place, location, hidden, navigate, newTab, drop, conte
   return <div className="tree-node">
     <div className={`tree-row ${location === place.path ? 'current' : ''} ${over ? 'drop-target' : ''}`} onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setOver(true); }} onDragLeave={() => setOver(false)} onDrop={event => { setOver(false); drop(event, place.path); }}>
       <button className="tree-toggle" style={{ left: 1 + level * 12 }} aria-label={`${expanded ? '折叠' : '展开'} ${place.name}`} aria-expanded={expanded} onClick={() => setExpanded(v => !v)}>{loading ? <Loader2 size={11} className="spinning"/> : <ChevronRight size={11}/>}</button>
-      <button className={`nav-item ${location === place.path ? 'current' : ''}`} style={{ paddingLeft: 24 + level * 12 }} onClick={() => navigate(place.path)} onAuxClick={event => { if (event.button === 1) newTab(place.path); }} onContextMenu={event => context(event, place)}>
+      <button className={`nav-item ${location === place.path ? 'current' : ''}`} style={{ paddingLeft: 24 + level * 12, paddingRight: eject ? 36 : undefined }} onClick={() => navigate(place.path)} onAuxClick={event => { if (event.button === 1) newTab(place.path); }} onContextMenu={event => context(event, place)}>
         {place.icon === 'folder' ? <FolderGlyph dimension={20}/> : <PlaceIcon icon={place.icon}/>}<span>{place.name}</span>{pinned && <Pin size={12} className="pin-mark"/>}
       </button>
+      {eject && <button className="volume-eject" aria-label={`推出“${place.name}”`} title={`推出“${place.name}”`} disabled={ejecting} onClick={event => { event.stopPropagation(); eject(); }}><Eject size={15}/></button>}
     </div>
     {expanded && <div role="group" aria-label={`${place.name} 的子文件夹`}>{error ? <p className="tree-note" title={error}>无法访问</p> : !loading && !children.length ? <p className="tree-note">没有子文件夹</p> : children.map(child => <NavigationTree key={child.path} place={{ path: child.path, name: child.name, icon: 'folder' }} location={location} hidden={hidden} navigate={navigate} newTab={newTab} drop={drop} context={context} level={Math.min(level + 1, 6)}/>)}</div>}
   </div>;

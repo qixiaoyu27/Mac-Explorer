@@ -3,7 +3,7 @@ export interface FileEntry {
   size: number; modified: number; created: number; extension: string; hidden: boolean;
 }
 export interface Place { path: string; name: string; icon: string }
-export interface Volume extends Place { total: number; free: number }
+export interface Volume extends Place { total: number; free: number; canEject: boolean }
 export type ThemeMode = 'light' | 'dark' | 'system';
 export interface Bootstrap { theme: ThemeMode; home: string; places: Place[]; volumes: Volume[]; initialPath?: string }
 export interface Listing { path: string; entries: FileEntry[] }
@@ -17,6 +17,8 @@ export type ExtractMode = 'choose' | 'here' | 'folder';
 export interface ArchivePreview { path: string; name: string; entries: { path: string; directory: boolean; size: number }[] }
 export interface ExplorerAPI {
   bootstrap(): Promise<Bootstrap>;
+  volumes(): Promise<Volume[]>;
+  ejectVolume(path: string): Promise<Volume[]>;
   listTrash(directory?: string): Promise<TrashListing>;
   restoreTrash(paths: string[], choose?: boolean): Promise<OperationResult | null>;
   emptyTrash(): Promise<OperationResult | null>;

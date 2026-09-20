@@ -394,3 +394,7 @@ button, .tab, .file-row, .archive-row {
 
 .trash-confirmation-preference { display: flex; align-items: center; gap: 8px; margin: -8px 0 22px; font-size: 12px; }
 .trash-confirmation-preference input[type="checkbox"] { width: 16px; height: 16px; margin: 0; padding: 0; accent-color: var(--accent); }
+
+.volume-eject { position: absolute; right: 7px; top: 6px; width: 25px; height: 25px; border-radius: 4px; color: var(--text-secondary); }
+.volume-eject:hover { background: var(--surface-active); color: var(--text); }
+.volume-eject:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

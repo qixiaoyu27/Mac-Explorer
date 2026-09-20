@@ -86,6 +86,22 @@ async function setClipboard(paths: string[], cut: boolean): Promise<ClipboardInf
   })));
   return { paths, cut };
 }
+async function readVolumes(input?: string): Promise<Volume[]> {
+  const helper = path.join(__dirname.replace(/app\.asar(?=\/)/, 'app.asar.unpacked'), 'native/volumes');
+  try {
+    const { stdout } = await promisify(execFile)(helper, input ? ['eject', input] : ['list']);
+    return JSON.parse(stdout);
+  } catch (error) {
+    const message = (error as { stderr?: string }).stderr?.trim();
+    throw new Error(input ? `无法推出磁盘：${message || readableError(error)}。请关闭正在使用它的文件或应用后重试。` : message || readableError(error));
+  }
+}
+ipc('volumes', () => readVolumes());
+ipc('eject-volume', async (input: unknown) => {
+  const requested = absolute(input);
+  if (testRoot && requested !== process.env.EXPLORER_TEST_EJECT_VOLUME) throw new Error('测试实例只能推出指定的临时磁盘。');
+  return readVolumes(requested);
+});
 async function bootstrap(): Promise<Bootstrap> {
   const home = testRoot || os.homedir();
   const candidates: Place[] = [
@@ -98,18 +114,7 @@ async function bootstrap(): Promise<Bootstrap> {
   ];
   const places = (await Promise.all(candidates.map(async place => (await fs.stat(place.path).catch(() => null))?.isDirectory() ? place : null))).filter((p): p is Place => p !== null);
   places.push({ name: '废纸篓', path: 'trash', icon: 'trash' });
-  const mounted = await fs.readdir('/Volumes').catch(() => [] as string[]);
-  const volumePaths = ['/', ...mounted.filter(name => name !== 'Macintosh HD').map(name => '/Volumes/' + name)];
-  const volumes: Volume[] = [];
-  const seen = new Set<number>();
-  for (const volumePath of volumePaths) {
-    try {
-      const [stat, info] = await Promise.all([fs.stat(volumePath), fs.statfs(volumePath)]);
-      if (seen.has(stat.dev)) continue;
-      seen.add(stat.dev);
-      volumes.push({ name: volumePath === '/' ? 'Macintosh HD' : path.basename(volumePath), path: volumePath, icon: 'drive', total: info.blocks * info.bsize, free: info.bavail * info.bsize });
-    } catch { /* Unmounted while enumerating. */ }
-  }
+  const volumes = await readVolumes();
   return { theme: nativeTheme.themeSource, home, places, volumes, initialPath: testRoot ? path.join(testRoot, 'Documents') : process.env.EXPLORER_START_PATH };
 }
 ipc('bootstrap', bootstrap);

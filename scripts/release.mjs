@@ -24,7 +24,7 @@ await build({ targets: Platform.MAC.createTarget(['dir'], Arch.arm64), publish: 
   ...pkg.build, directories: { output }, forceCodeSigning: false,
   mac: { ...pkg.build.mac, identity: null, notarize: false },
 } });
-for (const name of ['file-icon', 'archive-reader', 'scroll-gesture.node', 'trash-item']) {
+for (const name of ['file-icon', 'archive-reader', 'scroll-gesture.node', 'trash-item', 'volumes']) {
   await run('codesign', ['--force', '--sign', '-', path.join(app, 'Contents/Resources/app.asar.unpacked/dist-electron/native', name)]);
 }
 await run('codesign', ['--force', '--deep', '--sign', '-', app]);

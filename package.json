@@ -1,6 +1,6 @@
 {
   "name": "mac-explorer",
-  "version": "0.1.34",
+  "version": "0.1.35",
   "private": true,
   "description": "A Windows 11-style file explorer for macOS",
   "main": "dist-electron/main.cjs",
@@ -30,6 +30,7 @@
     "test:applications-address": "npm run build && node scripts/applications-address-smoke.mjs",
     "test:office-thumbnails": "npm run build && node scripts/office-thumbnails-smoke.mjs",
     "test:thumbnail-cache": "npm run build && node scripts/thumbnail-cache-smoke.mjs",
+    "test:eject": "npm run build && node scripts/eject-smoke.mjs",
     "test:trash-browser": "npm run build && node scripts/trash-browser-smoke.mjs && node scripts/trash-operations-smoke.mjs"
   },
   "dependencies": {

@@ -3,6 +3,8 @@ import type { ExplorerAPI } from '../shared/types';
 
 const api: ExplorerAPI = {
   bootstrap: () => ipcRenderer.invoke('bootstrap'),
+  volumes: () => ipcRenderer.invoke('volumes'),
+  ejectVolume: path => ipcRenderer.invoke('eject-volume', path),
   listTrash: directory => ipcRenderer.invoke('list-trash', directory),
   restoreTrash: (paths, choose) => ipcRenderer.invoke('restore-trash', paths, choose),
   emptyTrash: () => ipcRenderer.invoke('empty-trash'),
