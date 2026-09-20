@@ -31,7 +31,10 @@ fi`);
   const app = path.join(installDir, 'Mac Explorer.app');
   const firstInstall = await run();
   assert.equal((firstInstall.stdout.match(/⭐ Star/g) || []).length, 1);
-  assert.match(firstInstall.stdout, /https:\/\/github.com\/qixiaoyu27\/Mac-Explorer\s*$/);
+  assert.match(firstInstall.stdout, /✓ 安装完成/);
+  assert.match(firstInstall.stdout, /╭─ MAC EXPLORER/);
+  assert.match(firstInstall.stdout, /https:\/\/github.com\/qixiaoyu27\/Mac-Explorer/);
+  assert.equal(firstInstall.stdout.includes('\x1b['), false); // Redirected output has no ANSI codes.
   await exec('codesign', ['--verify', '--deep', '--strict', app]);
   assert.match((await exec('/usr/bin/xattr', ['-p', 'com.apple.quarantine', app])).stdout, /InstallerTest/);
   const original = await fs.readFile(path.join(app, 'Contents/Info.plist'));

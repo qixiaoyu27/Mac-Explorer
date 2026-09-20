@@ -85,12 +85,38 @@ if [[ -e "$destination" ]]; then
 fi
 mv "$stage/Mac Explorer.app" "$destination"
 installed=1
-printf '\n已安装 Mac Explorer %s：%s\n' "$version" "$destination"
-[[ -z "$backup" ]] || printf '旧版本备份：%s\n' "$backup"
-printf '安装完成。此版本为临时签名、未经 Apple 公证；若系统拦截，请按 README 的首次打开说明处理。\n'
-printf '安装说明：https://github.com/qixiaoyu27/Mac-Explorer#下载与安装\n'
+launch_message='可从应用程序目录打开'
 if [[ "${MAC_EXPLORER_NO_OPEN:-0}" != 1 ]]; then
-  open "$destination" || printf '应用已安装，请从应用程序目录手动打开。\n'
+  if open "$destination"; then launch_message='已请求启动应用'; else launch_message='请从应用程序目录手动打开'; fi
 fi
-printf '\n如果 Mac Explorer 让你用 Mac 更顺手，欢迎到 GitHub 点个 ⭐ Star，支持项目持续更新！\n'
-printf '%s\n' "$repo"
+
+show_completion() {
+  local title='' success='' muted='' accent='' reset=''
+  if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR+x}" ]]; then
+    title=$'\033[1;36m'; success=$'\033[1;32m'; muted=$'\033[2m'; accent=$'\033[1;33m'; reset=$'\033[0m'
+  fi
+  # An open right edge keeps full paths/URLs copyable without padding or clipping.
+  printf '\n  %s╭─ MAC EXPLORER ─────────────────%s\n' "$title" "$reset"
+  printf '  %s│%s\n' "$muted" "$reset"
+  printf '  %s│%s  %s✓ 安装完成%s  v%s\n' "$muted" "$reset" "$success" "$reset" "$version"
+  printf '  %s│%s  %s\n' "$muted" "$reset" "$launch_message"
+  printf '  %s│%s\n' "$muted" "$reset"
+  printf '  %s│  安装位置%s\n' "$muted" "$reset"
+  printf '  %s│%s  %s\n' "$muted" "$reset" "$destination"
+  if [[ -n "$backup" ]]; then
+    printf '  %s│%s\n' "$muted" "$reset"
+    printf '  %s│  旧版本备份%s\n' "$muted" "$reset"
+    printf '  %s│%s  %s\n' "$muted" "$reset" "$backup"
+  fi
+  printf '  %s│%s\n' "$muted" "$reset"
+  printf '  %s├───────────────────────────────%s\n' "$muted" "$reset"
+  printf '  %s│%s\n' "$muted" "$reset"
+  printf '  %s│%s  %s⭐ Star · 支持 Mac Explorer%s\n' "$muted" "$reset" "$accent" "$reset"
+  printf '  %s│%s  用 Mac 更顺手了？点亮一颗星，支持持续更新。\n' "$muted" "$reset"
+  printf '  %s│%s  %s\n' "$muted" "$reset" "$repo"
+  printf '  %s│%s\n' "$muted" "$reset"
+  printf '  %s╰───────────────────────────────%s\n\n' "$title" "$reset"
+  printf '  %s临时签名 · 未经 Apple 公证；若系统拦截，请查看安装说明。%s\n' "$muted" "$reset"
+  printf '  %s#下载与安装\n\n' "$repo"
+}
+show_completion
