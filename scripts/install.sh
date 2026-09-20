@@ -92,3 +92,5 @@ printf '安装说明：https://github.com/qixiaoyu27/Mac-Explorer#下载与安�
 if [[ "${MAC_EXPLORER_NO_OPEN:-0}" != 1 ]]; then
   open "$destination" || printf '应用已安装，请从应用程序目录手动打开。\n'
 fi
+printf '\n如果 Mac Explorer 让你用 Mac 更顺手，欢迎到 GitHub 点个 ⭐ Star，支持项目持续更新！\n'
+printf '%s\n' "$repo"

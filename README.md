@@ -33,6 +33,8 @@ Mac Explorer 面向习惯 Windows 文件资源管理器的 Mac 用户：熟悉�
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/main/scripts/install.sh)"
 ```
 
+如果 Mac Explorer 让你用 Mac 更顺手，欢迎到 [GitHub 点个 ⭐ Star](https://github.com/qixiaoyu27/Mac-Explorer)，支持项目持续更新！
+
 无需安装 npm、Node.js 或 Homebrew，也不需要 `sudo`。命令会下载并运行[本仓库的安装脚本](scripts/install.sh)，自动获取最新版本、校验 SHA-256 和应用签名，安装后启动应用。
 
 - 首次默认安装到个人应用程序目录 `~/Applications`；若已有 `/Applications/Mac Explorer.app`，则在该位置更新，需要目录可写。
