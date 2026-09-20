@@ -7,6 +7,8 @@ fail() { printf '安装失败：%s\n' "$*" >&2; exit 1; }
 [[ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" == 1 ]] || fail '目前仅支持 Apple Silicon（M 系列芯片）。'
 [[ "$(sw_vers -productVersion | cut -d. -f1)" -ge 13 ]] || fail '需要 macOS 13 或更高版本。'
 [[ "$EUID" -ne 0 ]] || fail '请使用普通用户运行，不要加 sudo。'
+allow_unnotarized="${MAC_EXPLORER_ALLOW_UNNOTARIZED:-0}"
+[[ "$allow_unnotarized" == 0 || "$allow_unnotarized" == 1 ]] || fail 'MAC_EXPLORER_ALLOW_UNNOTARIZED 只能是 0 或 1。'
 
 repo='https://github.com/qixiaoyu27/Mac-Explorer'
 install_dir="${MAC_EXPLORER_INSTALL_DIR:-$HOME/Applications}"
@@ -67,6 +69,12 @@ codesign --verify --deep --strict "$source_app"
 stage=$(mktemp -d "$install_dir/.mac-explorer-install.XXXXXX")
 ditto "$source_app" "$stage/Mac Explorer.app"
 codesign --verify --deep --strict "$stage/Mac Explorer.app"
+if [[ "$allow_unnotarized" == 1 ]]; then
+  printf '按你的选择，仅移除已校验 Mac Explorer 的下载隔离标记；不更改系统安全设置。\n'
+  # -s acts on symlinks themselves, never on targets outside the staged bundle.
+  /usr/bin/xattr -drs com.apple.quarantine "$stage/Mac Explorer.app" || fail '无法移除应用隔离标记，原安装未作修改。'
+  codesign --verify --deep --strict "$stage/Mac Explorer.app"
+fi
 app_running && fail '下载期间应用被打开，请先退出后重试。'
 if [[ -e "$destination" ]]; then
   backup_dir="$install_dir/.Mac Explorer Backups"

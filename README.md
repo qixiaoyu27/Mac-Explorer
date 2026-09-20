@@ -37,8 +37,18 @@ Mac Explorer 面向习惯 Windows 文件资源管理器的 Mac 用户：熟悉�
 
 - 首次默认安装到个人应用程序目录 `~/Applications`；若已有 `/Applications/Mac Explorer.app`，则在该位置更新，需要目录可写。
 - 更新时先退出 Mac Explorer，再执行同一命令。旧版本备份在安装目录的 `.Mac Explorer Backups` 中，已有偏好设置保留。
-- 一键安装不会补上 Apple 公证，也不会关闭 Gatekeeper 或移除隔离标记。如被系统拦截，请参考下方首次打开说明。
+- 默认保留下载隔离标记。如被系统拦截，请参考下方首次打开说明或选择下面的可选命令。
 - GitHub 连接失败时可重试，或使用下面的手动下载安装方式。
+
+#### 安装并允许未公证版本（可选）
+
+如果你信任本项目，并同意移除 **Mac Explorer 这一个应用**的下载隔离标记，可以直接使用这一行：
+
+```sh
+MAC_EXPLORER_ALLOW_UNNOTARIZED=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/main/scripts/install.sh)"
+```
+
+它将下载、校验、移除该应用的隔离标记、安装和启动合并执行。SHA-256 和应用签名校验仍然保留，校验失败就停止；不需要 `sudo`，不关闭系统 Gatekeeper，也不修改其他应用。这不是 Apple 公证或安全背书，系统其他安全检查仍可能拦截。若系统明确提示恶意软件，请勿使用此方式继续运行。
 
 ### 手动下载安装
 
