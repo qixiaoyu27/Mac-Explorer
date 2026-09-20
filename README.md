@@ -21,7 +21,7 @@
 
 Mac Explorer 面向习惯 Windows 文件资源管理器的 Mac 用户：熟悉的标签页、路径栏、右键菜单和快捷键，加上压缩包浏览与选择解压，让日常文件操作按你习惯的方式完成。
 
-这是独立开发的 macOS 应用，直接管理本机文件，使用系统权限、默认应用和废纸篓。安装后与 Finder 共存，不接管系统默认文件管理器。
+这是独立开发的 macOS 应用，直接管理本机文件，使用系统权限、默认应用和回收站。安装后与 Finder 共存，不接管系统默认文件管理器。
 
 ## 下载与安装
 
@@ -30,7 +30,7 @@ Mac Explorer 面向习惯 Windows 文件资源管理器的 Mac 用户：熟悉�
 打开 macOS 的「终端」，复制并执行：
 
 ```sh
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/refs/tags/v0.1.35/scripts/install.sh)"
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/refs/tags/v0.1.36/scripts/install.sh)"
 ```
 
 如果 Mac Explorer 让你用 Mac 更顺手，欢迎到 [GitHub 点个 ⭐ Star](https://github.com/qixiaoyu27/Mac-Explorer)，支持项目持续更新！
@@ -49,7 +49,7 @@ Mac Explorer 面向习惯 Windows 文件资源管理器的 Mac 用户：熟悉�
 如果你信任本项目，并同意移除 **Mac Explorer 这一个应用**的下载隔离标记，可以直接使用这一行：
 
 ```sh
-MAC_EXPLORER_ALLOW_UNNOTARIZED=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/refs/tags/v0.1.35/scripts/install.sh)"
+MAC_EXPLORER_ALLOW_UNNOTARIZED=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/refs/tags/v0.1.36/scripts/install.sh)"
 ```
 
 它将下载、校验、移除该应用的隔离标记、安装和启动合并执行。SHA-256 和应用签名校验仍然保留，校验失败就停止；不需要 `sudo`，不关闭系统 Gatekeeper，也不修改其他应用。这不是 Apple 公证或安全背书，系统其他安全检查仍可能拦截。若系统明确提示恶意软件，请勿使用此方式继续运行。
@@ -94,7 +94,7 @@ xattr -dr com.apple.quarantine "/Applications/Mac Explorer.app"
 每次发布附带 `SHA256SUMS.txt`。在下载目录运行以下命令，并将输出与同一 Release 中的校验文件对照：
 
 ```sh
-shasum -a 256 Mac-Explorer-0.1.35-mac-arm64.dmg
+shasum -a 256 Mac-Explorer-0.1.36-mac-arm64.dmg
 ```
 
 使用 ZIP 时，对 ZIP 文件执行相同校验即可。
@@ -155,7 +155,7 @@ ZIP、TAR.GZ、7z 已通过测试；其他格式（包括 RAR）取决于 macOS 
 | 复制 / 粘贴 / 撤销 | ⌘C / ⌘V / ⌘Z |
 | 移动已复制的文件 | ⌘C 后到目标文件夹按 ⌥⌘V |
 | 创建副本 / 全选 | ⌘D / ⌘A |
-| 新建文件夹 / 移到废纸篓 | ⇧⌘N / ⌘⌫ |
+| 新建文件夹 / 移到回收站 | ⇧⌘N / ⌘⌫ |
 | 前往文件夹 / 搜索 | ⇧⌘G / ⌘F |
 | 后退 / 前进 / 上一级 | ⌘[ / ⌘] / Backspace 或 ⌘↑ |
 | 新建 / 关闭 / 切换标签页 | ⌘T / ⌘W / ⌃Tab 或 ⌃⇧Tab |
@@ -197,8 +197,8 @@ supports_ssh = false
 
 ## 文件安全与当前边界
 
-- 同名目标不覆盖；批量操作分别报告成功项和失败项。删除进入 macOS 废纸篓。
-- 撤销支持本次应用会话中的新建、复制、移动和重命名；废纸篓恢复交给系统处理，删除会清空应用内撤销历史。
+- 同名目标不覆盖；批量操作分别报告成功项和失败项。删除进入 macOS 回收站。
+- 撤销支持本次应用会话中的新建、复制、移动和重命名；回收站恢复交给系统处理，删除会清空应用内撤销历史。
 - 访问权限由 macOS 管理。遇到权限提示，可到“系统设置 → 隐私与安全性 → 文件与文件夹”检查授权。
 - 搜索按文件名递归，最多扫描 30,000 项、返回 1,000 项；不递归跟随符号链接或进入应用包。
 - 文本预览上限 16 KB，图片 12 MB；归档目录上限 10,000 项，解压上限 20 GB / 5 分钟。

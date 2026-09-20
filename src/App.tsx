@@ -205,8 +205,8 @@ export default function App() {
         const result = await api.listTrash(location === TRASH ? undefined : location.slice(6));
         if (version === generation.current) {
           setTrashRoots(result.roots);
-          if (result.unavailable.length) setError('部分废纸篓无法读取。请检查系统设置 → 隐私与安全性 → 完全磁盘访问权限。');
-          if (submittedQuery) setSearchNote('搜索当前废纸篓位置');
+          if (result.unavailable.length) setError('部分回收站无法读取。请检查系统设置 → 隐私与安全性 → 完全磁盘访问权限。');
+          if (submittedQuery) setSearchNote('搜索当前回收站位置');
         }
         return result.entries.filter(entry => !submittedQuery || entry.name.toLocaleLowerCase().includes(submittedQuery.toLocaleLowerCase()));
       }
@@ -240,7 +240,7 @@ export default function App() {
   }, []);
 
   const places = useMemo<Place[]>(() => [...(boot?.places || []).filter(place => !unpinnedDefaults.includes(place.path)), ...pins.filter(p => !boot?.places.some(place => place.path === p)).map(p => ({ path: p, name: base(p), icon: 'folder' }))], [boot, pins, unpinnedDefaults]);
-  const label = useCallback((value: string) => value === '/Applications' || value === `${boot?.home}/Applications` ? '应用程序' : value === TRASH ? '废纸篓' : value.startsWith('trash:') ? base(value.slice(6)) : value === PC ? '此电脑' : !value || value === boot?.home ? '个人文件夹' : boot?.places.find(p => p.path === value)?.name || places.find(p => p.path === value)?.name || base(value), [boot, places]);
+  const label = useCallback((value: string) => value === '/Applications' || value === `${boot?.home}/Applications` ? '应用程序' : value === TRASH ? '回收站' : value.startsWith('trash:') ? base(value.slice(6)) : value === PC ? '此电脑' : !value || value === boot?.home ? '个人文件夹' : boot?.places.find(p => p.path === value)?.name || places.find(p => p.path === value)?.name || base(value), [boot, places]);
   const displayName = (entry: FileEntry) => entry.isDirectory && /\.app$/i.test(entry.name) ? entry.name.slice(0, -4) : extensions || entry.isDirectory || !entry.extension ? entry.name : entry.name.slice(0, -(entry.extension.length + 1));
   const visible = useMemo(() => {
     const items = entries.filter(e => hidden || !e.hidden || revealedPaths.includes(e.path));
@@ -348,12 +348,12 @@ export default function App() {
     if (success) { setEditingName(null); contentRef.current?.focus(); }
   }
   async function moveToTrash(paths: string[]) {
-    report(await api.trash(paths), '已移到废纸篓');
+    report(await api.trash(paths), '已移到回收站');
     setSelected(new Set());
   }
   function trash(paths = [...selected]) {
     if (!paths.length || operationLock.current || viewingTrash) return;
-    if (stored('skipTrashConfirmation', false)) void run('正在移到废纸篓…', () => moveToTrash(paths));
+    if (stored('skipTrashConfirmation', false)) void run('正在移到回收站…', () => moveToTrash(paths));
     else showModal({ kind: 'trash', paths });
   }
   function ejectVolume(volume: Volume) {
@@ -388,7 +388,7 @@ export default function App() {
     });
   }
   function clearTrash() {
-    void run('正在清空废纸篓…', async () => {
+    void run('正在清空回收站…', async () => {
       setTrashOperationError('');
       const result = await api.emptyTrash();
       if (result) { setTrashOperationError(result.errors.map(item => `${base(item.path)}：${item.message}`).join('\n')); report(result, '已永久删除'); setSelected(new Set()); navigate(TRASH); }
@@ -512,7 +512,7 @@ export default function App() {
     if (viewingTrash) {
       menuAt(event, [
         ...(entry ? [{ label: '还原', disabled: !!operation, action: () => restoreTrash(paths) }, { label: '还原到…', disabled: !!operation, action: () => restoreTrash(paths, true) }] : []),
-        { label: '清空废纸篓…', icon: <Trash2/>, disabled: !!operation, action: clearTrash },
+        { label: '清空回收站…', icon: <Trash2/>, disabled: !!operation, action: clearTrash },
         ...(entry ? [{ label: entry.isDirectory ? '打开' : '快速查看', icon: <FolderOpen/>, action: () => openEntry(entry) }, { label: '复制', icon: <Copy/>, action: () => copy(false, paths) }] : []),
         { label: '刷新', icon: <RotateCw/>, action: refreshDirectory },
         { label: hidden ? '不显示隐藏项目' : '显示隐藏的项目', checked: hidden, action: () => setHidden(v => !v) },
@@ -542,7 +542,7 @@ export default function App() {
       { label: '复制', icon: <Copy/>, shortcut: '⌘C', action: () => copy(false, paths) },
       { label: '复制文件地址', icon: <Copy/>, action: () => run('复制地址…', () => api.copyText(paths.join('\n')), '已复制文件地址') },
       { label: '重命名', icon: <TextCursorInput/>, shortcut: 'Return', disabled: paths.length !== 1, action: () => rename(target) },
-      { label: '移到废纸篓', icon: <Trash2/>, shortcut: '⌘⌫', danger: true, action: () => trash(paths) },
+      { label: '移到回收站', icon: <Trash2/>, shortcut: '⌘⌫', danger: true, action: () => trash(paths) },
       ...(entry.isDirectory ? [{ label: places.some(place => place.path === entry.path) ? '从快速访问取消固定' : '固定到快速访问', icon: <Pin/>, divider: true, action: () => togglePin(entry.path) }] : []),
       { label: '在访达中显示', icon: <ExternalLink/>, divider: true, action: () => run('正在显示…', () => api.reveal(entry.path)) },
       { label: '属性', icon: <Info/>, shortcut: '⌘I', action: () => toggleDetails(true) },
@@ -564,7 +564,7 @@ export default function App() {
       { label: '共享', icon: <Share2/>, action: () => run('共享文件…', () => api.share(paths)) },
       { label: '删除', icon: <Trash2/>, action: () => trash(paths) },
     ] : undefined;
-    menuAt(event, entry ? items.filter(item => !['剪切', '复制', '重命名', '移到废纸篓'].includes(item.label)) : items, quickActions);
+    menuAt(event, entry ? items.filter(item => !['剪切', '复制', '重命名', '移到回收站'].includes(item.label)) : items, quickActions);
   }
   const sortMenu: MenuItem[] = [
     ...(['name', 'modified', 'type', 'size'] as SortKey[]).map(key => ({ label: ({ name: '名称', modified: '修改日期', type: '类型', size: '大小' })[key], checked: sort === key, action: () => setSort(key) })),
@@ -852,7 +852,7 @@ export default function App() {
       <ToolButton label="粘贴 (⌘V)" disabled={!writable || !clipboard.paths.length || !!operation} onClick={() => paste()}><ClipboardPaste/></ToolButton>
       <ToolButton label="重命名 (Return)" disabled={viewingTrash || !single || !!operation} onClick={() => rename()}><TextCursorInput className="rename-icon"/></ToolButton>
       <ToolButton label="共享" disabled={!selected.size} onClick={() => run('共享文件…', () => api.share([...selected]))}><Share2/></ToolButton>
-      <ToolButton label="移到废纸篓 (⌘⌫)" disabled={viewingTrash || !selected.size || !!operation} onClick={() => trash()}><Trash2/></ToolButton>
+      <ToolButton label="移到回收站 (⌘⌫)" disabled={viewingTrash || !selected.size || !!operation} onClick={() => trash()}><Trash2/></ToolButton>
       <span className="toolbar-separator"/>
       <ToolButton label="排序" className="text-tool" onClick={event => buttonMenu(event, sortMenu)}><ArrowDownWideNarrow/><span>排序</span><ChevronDown size={12}/></ToolButton>
       <ToolButton label="查看" className="text-tool" onClick={event => buttonMenu(event, viewMenu)}><List/><span>查看</span><ChevronDown size={12}/></ToolButton>
@@ -877,7 +877,7 @@ export default function App() {
         </div>
         <div className="nav-divider"/>
         <div className="sidebar-section" aria-label="快速访问">
-          {places.map(place => place.path === TRASH ? <button key={TRASH} className={`nav-item ${viewingTrash ? 'current' : ''}`} onClick={() => navigate(TRASH)} onAuxClick={event => { if (event.button === 1) newTab(TRASH); }} onContextMenu={event => menuAt(event, [{ label: '在新标签页中打开', action: () => newTab(TRASH) }, { label: '从快速访问取消固定', icon: <Pin/>, action: () => togglePin(TRASH) }])}><PlaceIcon icon="trash"/><span>废纸篓</span><Pin size={12} className="pin-mark"/></button> : <NavigationTree key={place.path} place={{ ...place, name: label(place.path) }} location={location} hidden={hidden} pinned navigate={navigate} newTab={newTab} drop={drop}
+          {places.map(place => place.path === TRASH ? <button key={TRASH} className={`nav-item ${viewingTrash ? 'current' : ''}`} onClick={() => navigate(TRASH)} onAuxClick={event => { if (event.button === 1) newTab(TRASH); }} onContextMenu={event => menuAt(event, [{ label: '在新标签页中打开', action: () => newTab(TRASH) }, { label: '从快速访问取消固定', icon: <Pin/>, action: () => togglePin(TRASH) }])}><PlaceIcon icon="trash"/><span>回收站</span><Pin size={12} className="pin-mark"/></button> : <NavigationTree key={place.path} place={{ ...place, name: label(place.path) }} location={location} hidden={hidden} pinned navigate={navigate} newTab={newTab} drop={drop}
             context={(event, target) => menuAt(event, [{ label: '在新标签页中打开', icon: <Plus/>, action: () => newTab(target.path) }, terminalItem(target.path), { label: places.some(place => place.path === target.path) ? '从快速访问取消固定' : '固定到快速访问', icon: <Pin/>, action: () => togglePin(target.path) }])}/>)}
         </div>
         <div className="nav-divider"/>
@@ -888,13 +888,13 @@ export default function App() {
       <main className={`main-pane ${details || previewPane ? 'has-details' : ''}`}>
         {viewingTrash && trashOperationError && !error && <div className="error-bar" role="alert"><Info size={17}/><span>{trashOperationError}</span><button aria-label="关闭操作错误提示" onClick={() => setTrashOperationError('')}><X size={15}/></button></div>}
         {error && <div className="error-bar" role="alert"><Info size={17}/><span>{error}</span><button title="关闭提示" aria-label="关闭错误提示" onClick={() => setError('')}><X size={15}/></button></div>}
-        {viewingTrash && <div className="search-summary"><Trash2 size={16}/><span>废纸篓</span><small>还原到原位置；无法确定原位置时选择文件夹</small><button className="secondary-button" disabled={!selected.size || !!operation} onClick={() => restoreTrash()}>还原</button><button className="secondary-button" disabled={!!operation} onClick={clearTrash}>清空废纸篓…</button></div>}
+        {viewingTrash && <div className="search-summary"><Trash2 size={16}/><span>回收站</span><small>还原到原位置；无法确定原位置时选择文件夹</small><button className="secondary-button" disabled={!selected.size || !!operation} onClick={() => restoreTrash()}>还原</button><button className="secondary-button" disabled={!!operation} onClick={clearTrash}>清空回收站…</button></div>}
         {submittedQuery && <div className="search-summary"><Search size={16}/><span>“{submittedQuery}” 的搜索结果</span><small>{loading ? '正在搜索子文件夹…' : searchNote || `${visible.length} 个匹配项目`}</small><button onClick={() => { setQuery(''); setSubmittedQuery(''); }}>退出搜索</button></div>}
         <div ref={contentRef} tabIndex={0} className={`file-content view-${view} ${dragOver === location ? 'drop-target' : ''}`} aria-label={label(location)} aria-busy={loading}
           onPointerDown={startMarquee} onClickCapture={event => { if (suppressMarqueeClick.current) { event.preventDefault(); event.stopPropagation(); suppressMarqueeClick.current = false; } }}
           onContextMenu={event => contextMenu(event)}
           onDragOver={event => { if (writable) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDragOver(location); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragOver(null); }} onDrop={event => drop(event, location)}>
-          {location === PC && !submittedQuery ? <div className="computer-content"><h2><ChevronDown size={14}/>设备和驱动器（{boot?.volumes.length || 0}）</h2><div className="drive-grid">{boot?.volumes.map(volume => <button className="drive-card" key={volume.path} onContextMenu={event => menuAt(event, [{ label: '打开', action: () => navigate(volume.path) }, ...(volume.canEject ? [{ label: `推出“${volume.name}”`, icon: <Eject/>, disabled: !!operation, action: () => ejectVolume(volume) }] : [])])} onDoubleClick={() => navigate(volume.path)} onKeyDown={event => { if (event.key === 'Enter') navigate(volume.path); }}><HardDrive size={49} strokeWidth={1.2}/><span><strong>{volume.name}</strong><span className="storage-track"><span style={{ width: `${Math.max(0, Math.min(100, (1 - volume.free / volume.total) * 100))}%` }}/></span><small>{size(volume.free)} 可用，共 {size(volume.total)}</small></span></button>)}</div></div> : loading ? <Loading/> : visible.length ? fileRows() : <div className="empty-state">{submittedQuery ? <Search size={42} strokeWidth={1.2}/> : <FolderGlyph dimension={68}/>}<h2>{error ? '无法显示此位置' : submittedQuery ? '没有找到匹配的项目' : viewingTrash ? '废纸篓为空' : '此文件夹为空'}</h2><p>{error ? '检查访问权限，或返回上一个文件夹。' : submittedQuery ? '尝试其他名称，或到上一级文件夹中搜索。' : viewingTrash ? '这里显示废纸篓中的项目。' : '将文件拖到这里，或使用“新建”创建文件夹。'}</p>{error && <button className="secondary-button" onClick={() => setRefresh(v => v + 1)}>重试</button>}</div>}
+          {location === PC && !submittedQuery ? <div className="computer-content"><h2><ChevronDown size={14}/>设备和驱动器（{boot?.volumes.length || 0}）</h2><div className="drive-grid">{boot?.volumes.map(volume => <button className="drive-card" key={volume.path} onContextMenu={event => menuAt(event, [{ label: '打开', action: () => navigate(volume.path) }, ...(volume.canEject ? [{ label: `推出“${volume.name}”`, icon: <Eject/>, disabled: !!operation, action: () => ejectVolume(volume) }] : [])])} onDoubleClick={() => navigate(volume.path)} onKeyDown={event => { if (event.key === 'Enter') navigate(volume.path); }}><HardDrive size={49} strokeWidth={1.2}/><span><strong>{volume.name}</strong><span className="storage-track"><span style={{ width: `${Math.max(0, Math.min(100, (1 - volume.free / volume.total) * 100))}%` }}/></span><small>{size(volume.free)} 可用，共 {size(volume.total)}</small></span></button>)}</div></div> : loading ? <Loading/> : visible.length ? fileRows() : <div className="empty-state">{submittedQuery ? <Search size={42} strokeWidth={1.2}/> : <FolderGlyph dimension={68}/>}<h2>{error ? '无法显示此位置' : submittedQuery ? '没有找到匹配的项目' : viewingTrash ? '回收站为空' : '此文件夹为空'}</h2><p>{error ? '检查访问权限，或返回上一个文件夹。' : submittedQuery ? '尝试其他名称，或到上一级文件夹中搜索。' : viewingTrash ? '这里显示回收站中的项目。' : '将文件拖到这里，或使用“新建”创建文件夹。'}</p>{error && <button className="secondary-button" onClick={() => setRefresh(v => v + 1)}>重试</button>}</div>}
           {selectionBox && <div className="selection-marquee" style={selectionBox} aria-hidden="true"/>}
         </div>
       </main>
@@ -1065,13 +1065,13 @@ function ModalDialog({ modal, value, onChange, error, busy, onClose, onSubmit }:
     const input = inputRef.current;
     if (input) { input.focus(); const dot = value.lastIndexOf('.'); input.setSelectionRange(0, modal.kind === 'rename' && dot > 0 ? dot : value.length); }
   }, []);
-  const title = modal.kind === 'trash' ? '移到废纸篓' : modal.kind === 'rename' ? '重命名' : modal.kind === 'folder' ? '新建文件夹' : modal.kind === 'file' ? '新建文本文档' : '键盘快捷键';
+  const title = modal.kind === 'trash' ? '移到回收站' : modal.kind === 'rename' ? '重命名' : modal.kind === 'folder' ? '新建文件夹' : modal.kind === 'file' ? '新建文本文档' : '键盘快捷键';
   return <dialog ref={dialogRef} className={`modal ${modal.kind === 'shortcuts' ? 'shortcut-modal' : ''}`} aria-labelledby="modal-title" onCancel={event => { event.preventDefault(); onClose(); }} onClose={onClose}>
     <form onSubmit={event => { event.preventDefault(); onSubmit(modal.kind === 'trash' && skipTrashConfirmation); }}><div className="modal-heading"><h2 id="modal-title">{title}</h2><button type="button" aria-label="关闭对话框" onClick={onClose} disabled={busy}><X size={18}/></button></div>
-      {modal.kind === 'shortcuts' ? <><p className="shortcut-note">文件操作遵循 macOS 访达的常用快捷键。</p><div className="shortcut-list">{[['重命名', 'Return'], ['打开项目', '⌘O / ⌘↓'], ['复制 / 粘贴 / 撤销', '⌘C / ⌘V / ⌘Z'], ['移动已复制的文件', '⌥⌘V'], ['创建副本', '⌘D'], ['全选 / 新建文件夹', '⌘A / ⇧⌘N'], ['移到废纸篓', '⌘⌫'], ['快速查看', 'Space / ⌘Y'], ['后退 / 前进 / 上一级', '⌘[ / ⌘] / Backspace 或 ⌘↑'], ['前往文件夹 / 搜索', '⇧⌘G / ⌘F'], ['新建 / 关闭标签页', '⌘T / ⌘W'], ['切换标签页', '⌃Tab / ⌃⇧Tab'], ['图标 / 详细信息视图', '⌘1 / ⌘2'], ['预览窗格 / 隐藏项目', '⇧⌘P / ⇧⌘.'], ['详细信息窗格', '⌘I']].map(([name, keys]) => <div key={name}><span>{name}</span><kbd>{keys}</kbd></div>)}</div><p className="shortcut-note">移动文件：先 ⌘C，再到目标文件夹按 ⌥⌘V。保留 Ctrl+C / X / V、F2、F5 等兼容快捷键；输入框内沿用文本编辑快捷键。</p></> : modal.kind === 'trash' ? <div className="trash-description"><Trash2 size={34} strokeWidth={1.4}/><div><p>将{modal.paths.length === 1 ? `“${base(modal.paths[0])}”` : `这 ${modal.paths.length} 个项目`}移到废纸篓？</p><small>文件将移入 macOS 废纸篓，你可以从那里恢复。</small></div></div> : <><label className="name-label" htmlFor="entry-name">名称</label><input ref={inputRef} id="entry-name" value={value} onChange={event => onChange(event.target.value)} disabled={busy} autoComplete="off"/><p className="modal-location">位置：{modal.kind === 'rename' ? parent(modal.path) : modal.path}</p></>}
+      {modal.kind === 'shortcuts' ? <><p className="shortcut-note">文件操作遵循 macOS 访达的常用快捷键。</p><div className="shortcut-list">{[['重命名', 'Return'], ['打开项目', '⌘O / ⌘↓'], ['复制 / 粘贴 / 撤销', '⌘C / ⌘V / ⌘Z'], ['移动已复制的文件', '⌥⌘V'], ['创建副本', '⌘D'], ['全选 / 新建文件夹', '⌘A / ⇧⌘N'], ['移到回收站', '⌘⌫'], ['快速查看', 'Space / ⌘Y'], ['后退 / 前进 / 上一级', '⌘[ / ⌘] / Backspace 或 ⌘↑'], ['前往文件夹 / 搜索', '⇧⌘G / ⌘F'], ['新建 / 关闭标签页', '⌘T / ⌘W'], ['切换标签页', '⌃Tab / ⌃⇧Tab'], ['图标 / 详细信息视图', '⌘1 / ⌘2'], ['预览窗格 / 隐藏项目', '⇧⌘P / ⇧⌘.'], ['详细信息窗格', '⌘I']].map(([name, keys]) => <div key={name}><span>{name}</span><kbd>{keys}</kbd></div>)}</div><p className="shortcut-note">移动文件：先 ⌘C，再到目标文件夹按 ⌥⌘V。保留 Ctrl+C / X / V、F2、F5 等兼容快捷键；输入框内沿用文本编辑快捷键。</p></> : modal.kind === 'trash' ? <div className="trash-description"><Trash2 size={34} strokeWidth={1.4}/><div><p>将{modal.paths.length === 1 ? `“${base(modal.paths[0])}”` : `这 ${modal.paths.length} 个项目`}移到回收站？</p><small>文件将移入 macOS 回收站，你可以从那里恢复。</small></div></div> : <><label className="name-label" htmlFor="entry-name">名称</label><input ref={inputRef} id="entry-name" value={value} onChange={event => onChange(event.target.value)} disabled={busy} autoComplete="off"/><p className="modal-location">位置：{modal.kind === 'rename' ? parent(modal.path) : modal.path}</p></>}
       {modal.kind === 'trash' && <label className="trash-confirmation-preference"><input type="checkbox" checked={skipTrashConfirmation} disabled={busy} onChange={event => setSkipTrashConfirmation(event.target.checked)}/>不再显示此提示</label>}
       {error && <p className="modal-error" role="alert">{error}</p>}
-      <div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>{modal.kind === 'shortcuts' ? '知道了' : '取消'}</button>{modal.kind !== 'shortcuts' && <button type="submit" className="primary-button" disabled={busy || modal.kind !== 'trash' && !value.trim()}>{busy ? '正在处理…' : modal.kind === 'trash' ? '移到废纸篓' : '确定'}</button>}</div>
+      <div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>{modal.kind === 'shortcuts' ? '知道了' : '取消'}</button>{modal.kind !== 'shortcuts' && <button type="submit" className="primary-button" disabled={busy || modal.kind !== 'trash' && !value.trim()}>{busy ? '正在处理…' : modal.kind === 'trash' ? '移到回收站' : '确定'}</button>}</div>
     </form>
   </dialog>;
 }

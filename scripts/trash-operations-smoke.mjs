@@ -14,7 +14,7 @@ try {
   const page = await app.firstWindow(); page.setDefaultTimeout(15000);
   await page.locator('.file-content[aria-busy=false]').waitFor();
   assert.equal((await page.evaluate(source => window.explorer.trash([source]), source)).succeeded.length, 1);
-  await page.locator('.sidebar').getByRole('button', { name: '废纸篓', exact: true }).click();
+  await page.locator('.sidebar').getByRole('button', { name: '回收站', exact: true }).click();
   const row = name => page.getByRole('option', { name, exact: true });
   await fs.writeFile(source, 'collision contents');
   await row('还原测试.txt').click();
@@ -43,14 +43,14 @@ try {
   await page.getByRole('button', { name: '刷新 (F5)', exact: true }).click(); await row('清空测试.txt').waitFor();
   await app.evaluate(({ dialog }) => { dialog.showMessageBox = async (_window, options) => { globalThis.trashConfirmation = options; return { response: 0 }; }; });
   await page.evaluate(() => localStorage.setItem('skipTrashConfirmation', 'true'));
-  await page.getByRole('button', { name: '清空废纸篓…', exact: true }).click();
+  await page.getByRole('button', { name: '清空回收站…', exact: true }).click();
   await page.waitForFunction(() => !document.querySelector('.search-summary button:last-child:disabled'));
   assert.equal(await fs.readFile(path.join(root, '.Trash', '清空测试.txt'), 'utf8'), 'remove fixture');
   const confirmation = await app.evaluate(() => globalThis.trashConfirmation);
   assert.equal(confirmation.defaultId, 0); assert.equal(confirmation.cancelId, 0); assert.match(confirmation.detail, /无法撤销/);
   await app.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 1 }); });
-  await page.getByRole('button', { name: '清空废纸篓…', exact: true }).click();
-  await page.getByText('废纸篓为空', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '清空回收站…', exact: true }).click();
+  await page.getByText('回收站为空', { exact: true }).waitFor();
   assert.equal(await fs.readFile(source, 'utf8'), 'restore contents');
   await page.screenshot({ path: 'artifacts/trash-operations-fixture.png' });
   console.log('PASS: origin restore, unknown-origin picker cancellation, restore-to, empty cancellation, permanent confirmation independent of skip preference, confirmed fixture deletion. Native dialogs stubbed.');

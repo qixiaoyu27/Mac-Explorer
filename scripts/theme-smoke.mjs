@@ -66,7 +66,7 @@ try {
   await page.screenshot({ path: 'artifacts/theme-dark-menu.png' });
   await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
   await page.getByRole('option', { name: '使用说明.txt', exact: true }).click();
-  await page.getByRole('button', { name: '移到废纸篓 (⌘⌫)', exact: true }).click();
+  await page.getByRole('button', { name: '移到回收站 (⌘⌫)', exact: true }).click();
   await page.getByRole('dialog').waitFor();
   assert.equal(await bg('.modal'), 'rgb(43, 43, 43)');
   assert.ok(await contrast('.trash-description p', '.modal') >= 4.5);

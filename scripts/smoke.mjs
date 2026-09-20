@@ -140,7 +140,7 @@ try {
 
   await page.getByRole('option', { name: '外部新增.txt', exact: true }).click();
   await page.keyboard.press('Meta+Backspace');
-  await page.getByRole('button', { name: '移到废纸篓', exact: true }).click();
+  await page.getByRole('button', { name: '移到回收站', exact: true }).click();
   await page.getByText('此文件夹为空', { exact: true }).waitFor();
   await assert.rejects(fs.access(dropped));
   console.log('PASS: Command+Delete moves a temporary test file to native Trash');

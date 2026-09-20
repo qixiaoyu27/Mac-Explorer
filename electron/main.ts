@@ -113,7 +113,7 @@ async function bootstrap(): Promise<Bootstrap> {
     { name: '视频', path: path.join(home, 'Movies'), icon: 'video' },
   ];
   const places = (await Promise.all(candidates.map(async place => (await fs.stat(place.path).catch(() => null))?.isDirectory() ? place : null))).filter((p): p is Place => p !== null);
-  places.push({ name: '废纸篓', path: 'trash', icon: 'trash' });
+  places.push({ name: '回收站', path: 'trash', icon: 'trash' });
   const volumes = await readVolumes();
   return { theme: nativeTheme.themeSource, home, places, volumes, initialPath: testRoot ? path.join(testRoot, 'Documents') : process.env.EXPLORER_START_PATH };
 }
@@ -143,13 +143,13 @@ ipc('restore-trash', async (inputs: unknown, choose: unknown = false) => {
 });
 let emptyingTrash = false;
 ipc('empty-trash', async () => {
-  if (emptyingTrash) throw new Error('废纸篓正在处理中。');
+  if (emptyingTrash) throw new Error('回收站正在处理中。');
   emptyingTrash = true;
   try {
     const roots = await trashRoots();
     const snapshot = await snapshotTrash(roots);
     if (!snapshot.length) return { succeeded: [], errors: [] };
-    const answer = await dialog.showMessageBox(window!, { type: 'warning', title: '清空废纸篓', message: `永久删除废纸篓中的 ${snapshot.length} 个项目？`, detail: '包含本机及已连接磁盘的废纸篓。此操作无法撤销。确认后新加入的顶层项目将保留。', buttons: ['取消', '永久删除'], defaultId: 0, cancelId: 0, noLink: true });
+    const answer = await dialog.showMessageBox(window!, { type: 'warning', title: '清空回收站', message: `永久删除回收站中的 ${snapshot.length} 个项目？`, detail: '包含本机及已连接磁盘的回收站。此操作无法撤销。确认后新加入的顶层项目将保留。', buttons: ['取消', '永久删除'], defaultId: 0, cancelId: 0, noLink: true });
     if (answer.response !== 1) return null;
     const result = await emptyTrash(roots, snapshot);
     if (result.succeeded.length) history.clear();
@@ -171,7 +171,7 @@ async function moveToSystemTrash(input: string) {
     trashed = absolute(JSON.parse(stdout).path);
   }
   try { await trashOrigins.remember(trashed, source); }
-  catch { throw new Error('文件已移入废纸篓，但无法保存原位置。请在废纸篓使用“还原到…”恢复。'); }
+  catch { throw new Error('文件已移入回收站，但无法保存原位置。请在回收站使用“还原到…”恢复。'); }
 }
 ipc('take-open-paths', () => openPaths.splice(0));
 function isThemeMode(value: unknown): value is ThemeMode { return value === 'light' || value === 'dark' || value === 'system'; }
