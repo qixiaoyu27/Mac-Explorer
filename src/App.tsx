@@ -475,7 +475,7 @@ export default function App() {
       { label: '将项目移到这里', shortcut: '⌥⌘V', disabled: !writable || !clipboard.paths.length, action: () => paste(true) },
       { label: undoLabel ? `撤销${undoLabel}` : '撤销', icon: <Undo2/>, shortcut: '⌘Z', disabled: !undoLabel, action: undo },
       { label: '刷新', icon: <RotateCw/>, shortcut: 'F5', action: refreshDirectory },
-      { label: '显示隐藏的项目', checked: hidden, divider: true, action: () => setHidden(v => !v) },
+      { label: hidden ? '不显示隐藏项目' : '显示隐藏的项目', checked: hidden, divider: true, action: () => setHidden(v => !v) },
       { label: '打开文件夹…', icon: <FolderOpen/>, action: chooseFolder },
       ...(!isVirtual(location) ? [terminalItem(location)] : []),
     ];
