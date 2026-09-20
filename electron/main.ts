@@ -351,6 +351,12 @@ app.whenReady().then(async () => {
   ]));
   readyForOpen = true;
   createWindow();
+  if (process.platform === 'darwin') {
+    const gestures = require(path.join(__dirname.replace(/app\.asar(?=\/)/, 'app.asar.unpacked'), 'native/scroll-gesture.node')) as { start(callback: (timestamp: number) => void): void };
+    gestures.start(timestamp => {
+      if (window && !window.isDestroyed()) window.webContents.send('scroll-gesture-start', timestamp);
+    });
+  }
   app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin' || testRoot) app.quit(); });

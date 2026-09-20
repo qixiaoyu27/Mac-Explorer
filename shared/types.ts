@@ -49,4 +49,5 @@ export interface ExplorerAPI {
   watch(path: string | null): Promise<void>;
   onDirectoryChange(callback: () => void): () => void;
   onAction(callback: (action: string) => void): () => void;
+  onScrollGestureStart(callback: (timestamp: number) => void): () => void;
 }

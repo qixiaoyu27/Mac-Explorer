@@ -617,18 +617,39 @@ export default function App() {
   };
   useEffect(() => {
     // Wheel events include trackpad momentum. Keep the gesture latched across
-    // navigation/renders until the stream has been quiet for 250 ms.
+    // navigation/renders until a quiet gap or a fresh stroke after the tail.
     let lastEvent = -Infinity;
     let distanceX = 0; let distanceY = 0;
     let mode: 'pending' | 'horizontal' | 'ignored' | 'done' = 'pending';
     let context = '';
+    let navigatedAt = -Infinity;
+    let previousX = 0;
+    let tailStartedAt: number | null = null;
+    let navigatedEpoch = -Infinity;
+    const stopGestureListener = api.onScrollGestureStart(timestamp => {
+      // Native finger-down marks a new stroke even while old momentum is still
+      // arriving. Ignore a delayed signal from the stroke already navigated.
+      if (timestamp <= navigatedEpoch) return;
+      lastEvent = -Infinity; mode = 'pending'; tailStartedAt = null;
+    });
     const swipe = (event: WheelEvent) => {
+      // macOS can continue sending zero-delta phase events after fingers lift.
+      // They must not keep the previous gesture alive.
+      if (!event.deltaX && !event.deltaY) return;
       const current = swipeNavigation.current;
       const now = performance.now();
-      if (now - lastEvent > 250) {
+      const x = Math.abs(event.deltaX);
+      // A fresh stroke can interrupt the previous stroke's momentum without a
+      // quiet gap. Rearm only after a sustained low-energy tail and a new surge.
+      const freshStroke = mode === 'done' && now - navigatedAt >= 180 &&
+        tailStartedAt !== null && now - tailStartedAt >= 60 &&
+        x >= 8 && x >= previousX * 3 && x > Math.abs(event.deltaY) * 1.25;
+      if (now - lastEvent > 250 || freshStroke) {
         distanceX = 0; distanceY = 0; mode = 'pending'; context = current.context;
+        tailStartedAt = null;
       }
       lastEvent = now;
+      previousX = x;
       const target = event.target instanceof Element ? event.target : null;
       const content = contentRef.current;
       const editable = (element: Element | null) => !!element?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
@@ -636,7 +657,11 @@ export default function App() {
         !content || !target || !content.contains(target) || editable(target) || editable(document.activeElement)) {
         mode = 'ignored'; return;
       }
-      if (mode === 'done') { event.preventDefault(); return; }
+      if (mode === 'done') {
+        if (x <= 4) tailStartedAt ??= now;
+        else tailStartedAt = null;
+        event.preventDefault(); return;
+      }
       if (context !== current.context) mode = 'ignored';
       if (mode === 'ignored') return;
       // A horizontally scrollable list owns the entire gesture, including at
@@ -652,16 +677,21 @@ export default function App() {
       distanceX += event.deltaX; distanceY += Math.abs(event.deltaY);
       if (mode === 'pending') {
         if (Math.max(Math.abs(distanceX), distanceY) < 10) return;
-        if (Math.abs(distanceX) <= distanceY * 1.5) { mode = 'ignored'; return; }
+        // A diagonal start is undecided, not a rejected horizontal gesture.
+        // Only lock out navigation when the stream is clearly vertical.
+        if (distanceY > Math.abs(distanceX) * 1.5) { mode = 'ignored'; return; }
+        if (Math.abs(distanceX) <= distanceY * 1.25) return;
         mode = 'horizontal';
       }
       event.preventDefault();
-      if (Math.abs(distanceX) < 90) return;
+      if (Math.abs(distanceX) < 48) return;
       mode = 'done';
+      navigatedAt = now; tailStartedAt = null;
+      navigatedEpoch = performance.timeOrigin + event.timeStamp;
       current.historyGo(distanceX < 0 ? -1 : 1);
     };
     document.addEventListener('wheel', swipe, { passive: false });
-    return () => document.removeEventListener('wheel', swipe);
+    return () => { document.removeEventListener('wheel', swipe); stopGestureListener(); };
   }, []);
   useEffect(() => {
     const element = contentRef.current;

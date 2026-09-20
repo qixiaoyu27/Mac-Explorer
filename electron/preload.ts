@@ -36,5 +36,6 @@ const api: ExplorerAPI = {
   watch: path => ipcRenderer.invoke('watch', path),
   onDirectoryChange: callback => { const listener = () => callback(); ipcRenderer.on('directory-changed', listener); return () => ipcRenderer.removeListener('directory-changed', listener); },
   onAction: callback => { const listener = (_event: unknown, action: string) => callback(action); ipcRenderer.on('action', listener); return () => ipcRenderer.removeListener('action', listener); },
+  onScrollGestureStart: callback => { const listener = (_event: unknown, timestamp: number) => callback(timestamp); ipcRenderer.on('scroll-gesture-start', listener); return () => ipcRenderer.removeListener('scroll-gesture-start', listener); },
 };
 contextBridge.exposeInMainWorld('explorer', api);
