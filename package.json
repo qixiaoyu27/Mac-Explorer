@@ -9,7 +9,7 @@
     "dev": "node scripts/dev.mjs",
     "build": "tsc --noEmit && vite build && node scripts/build-electron.mjs",
     "start": "npm run build && electron .",
-    "test": "node --import tsx --test tests/files.test.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
     "test:compression": "npm run build && node scripts/compression-smoke.mjs",
     "test:archive": "npm run build && node scripts/archive-smoke.mjs && node scripts/extraction-smoke.mjs",
     "test:ui": "npm run build && node scripts/smoke.mjs",
@@ -29,7 +29,8 @@
     "test:trash-confirmation": "npm run build && node scripts/trash-confirmation-smoke.mjs",
     "test:applications-address": "npm run build && node scripts/applications-address-smoke.mjs",
     "test:office-thumbnails": "npm run build && node scripts/office-thumbnails-smoke.mjs",
-    "test:thumbnail-cache": "npm run build && node scripts/thumbnail-cache-smoke.mjs"
+    "test:thumbnail-cache": "npm run build && node scripts/thumbnail-cache-smoke.mjs",
+    "test:trash-browser": "npm run build && node scripts/trash-browser-smoke.mjs && node scripts/trash-operations-smoke.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.577.0",

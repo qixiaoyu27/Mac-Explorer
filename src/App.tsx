@@ -13,6 +13,8 @@ import type { ExtractMode, ArchivePreview, Bootstrap, ClipboardInfo, FileEntry, 
 
 const api = window.explorer;
 const PC = 'computer';
+const TRASH = 'trash';
+function isTrashLocation(value: string) { return value === TRASH || value.startsWith('trash:'); }
 type Tab = { id: string; location: string; history: string[]; index: number };
 type SortKey = 'name' | 'modified' | 'type' | 'size';
 type View = 'details' | 'icons' | 'list' | 'tiles' | 'content';
@@ -24,7 +26,7 @@ function stored<T,>(key: string, fallback: T): T { try { return JSON.parse(local
 function base(path: string) { return path.split('/').filter(Boolean).at(-1) || 'Macintosh HD'; }
 function parent(path: string) { return path.slice(0, path.lastIndexOf('/')) || '/'; }
 function join(path: string, name: string) { return `${path === '/' ? '' : path}/${name}`; }
-function isVirtual(location: string) { return !location || location === PC; }
+function isVirtual(location: string) { return !location || location === PC || isTrashLocation(location); }
 function size(bytes: number) { return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: bytes >= 1e9 ? 1 : 0 }).format(bytes / (bytes >= 1024 ** 3 ? 1024 ** 3 : bytes >= 1024 ** 2 ? 1024 ** 2 : bytes >= 1024 ? 1024 : 1)) + ' ' + (bytes >= 1024 ** 3 ? 'GB' : bytes >= 1024 ** 2 ? 'MB' : bytes >= 1024 ? 'KB' : '字节'); }
 function date(value: number) { return new Date(value).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }); }
 function type(entry: FileEntry) {
@@ -35,7 +37,7 @@ function type(entry: FileEntry) {
 function errorMessage(error: unknown) { return String(error instanceof Error ? error.message : error).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
 
 function PlaceIcon({ icon, size: dimension = 18 }: { icon: string; size?: number }) {
-  const Component = ({ star: Star, desktop: Monitor, download: Download, document: FileText, image: Image, music: Music2, video: Film, drive: HardDrive, folder: FolderOpen, computer: Monitor } as Record<string, typeof FolderOpen>)[icon] || FolderOpen;
+  const Component = ({ trash: Trash2, star: Star, desktop: Monitor, download: Download, document: FileText, image: Image, music: Music2, video: Film, drive: HardDrive, folder: FolderOpen, computer: Monitor } as Record<string, typeof FolderOpen>)[icon] || FolderOpen;
   return <Component size={dimension} strokeWidth={1.6} className={`place-icon icon-${icon}`} aria-hidden="true" />;
 }
 function ViewGlyph({ mode }: { mode: 'extra' | 'large' | 'medium' | 'small' | 'list' | 'details' | 'tiles' | 'content' }) {
@@ -109,6 +111,9 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
   const [searchNote, setSearchNote] = useState('');
+  const [trashRoots, setTrashRoots] = useState<string[]>([]);
+  const [trashOperationError, setTrashOperationError] = useState('');
+  const viewingTrash = isTrashLocation(location);
   const [editingAddress, setEditingAddress] = useState(false);
   const [address, setAddress] = useState('');
   const [refresh, setRefresh] = useState(0);
@@ -167,7 +172,7 @@ export default function App() {
   useEffect(() => { api.bootstrap().then(data => {
     setBoot(data); setTheme(data.theme);
     const saved = stored<unknown>('tabs', []);
-    const folders = Array.isArray(saved) ? saved.filter((p): p is string => typeof p === 'string' && (p === PC || p.startsWith('/'))) : [];
+    const folders = Array.isArray(saved) ? saved.filter((p): p is string => typeof p === 'string' && (p === PC || isTrashLocation(p) || p.startsWith('/'))) : [];
     const initial = (data.initialPath ? [data.initialPath] : [...new Set([data.home, ...folders])].slice(0, 12)).map(makeTab);
     setTabs(initial); setActiveID(initial[0].id);
   }).catch(e => { setError(errorMessage(e)); setLoading(false); }); }, []);
@@ -192,6 +197,15 @@ export default function App() {
     const version = ++generation.current;
     setLoading(loadedLocation.current !== location || !!submittedQuery); setError(''); setSearchNote('');
     const load = async () => {
+      if (isTrashLocation(location)) {
+        const result = await api.listTrash(location === TRASH ? undefined : location.slice(6));
+        if (version === generation.current) {
+          setTrashRoots(result.roots);
+          if (result.unavailable.length) setError('部分废纸篓无法读取。请检查系统设置 → 隐私与安全性 → 完全磁盘访问权限。');
+          if (submittedQuery) setSearchNote('搜索当前废纸篓位置');
+        }
+        return result.entries.filter(entry => !submittedQuery || entry.name.toLocaleLowerCase().includes(submittedQuery.toLocaleLowerCase()));
+      }
       if (submittedQuery) {
         const result = await api.search(isVirtual(location) ? boot.home : location, submittedQuery, hidden);
         if (version === generation.current) setSearchNote([result.truncated ? '已达到搜索上限，请缩小范围（最多 1,000 个结果 / 30,000 个项目）' : '', result.skipped ? `${result.skipped} 个位置无法访问` : ''].filter(Boolean).join(' · '));
@@ -222,7 +236,7 @@ export default function App() {
   }, []);
 
   const places = useMemo<Place[]>(() => [...(boot?.places || []).filter(place => !unpinnedDefaults.includes(place.path)), ...pins.filter(p => !boot?.places.some(place => place.path === p)).map(p => ({ path: p, name: base(p), icon: 'folder' }))], [boot, pins, unpinnedDefaults]);
-  const label = useCallback((value: string) => value === '/Applications' || value === `${boot?.home}/Applications` ? '应用程序' : value === PC ? '此电脑' : !value || value === boot?.home ? '个人文件夹' : boot?.places.find(p => p.path === value)?.name || places.find(p => p.path === value)?.name || base(value), [boot, places]);
+  const label = useCallback((value: string) => value === '/Applications' || value === `${boot?.home}/Applications` ? '应用程序' : value === TRASH ? '废纸篓' : value.startsWith('trash:') ? base(value.slice(6)) : value === PC ? '此电脑' : !value || value === boot?.home ? '个人文件夹' : boot?.places.find(p => p.path === value)?.name || places.find(p => p.path === value)?.name || base(value), [boot, places]);
   const displayName = (entry: FileEntry) => entry.isDirectory && /\.app$/i.test(entry.name) ? entry.name.slice(0, -4) : extensions || entry.isDirectory || !entry.extension ? entry.name : entry.name.slice(0, -(entry.extension.length + 1));
   const visible = useMemo(() => {
     const items = entries.filter(e => hidden || !e.hidden || revealedPaths.includes(e.path));
@@ -256,6 +270,12 @@ export default function App() {
     if (index < 0 || index >= tab.history.length) return;
     resetNavigation(); setTabs(previous => previous.map(t => t.id === tab.id ? { ...t, index, location: t.history[index] } : t));
   }
+  function goParent() {
+    if (location.startsWith('trash:')) {
+      const next = parent(location.slice(6));
+      navigate(trashRoots.includes(next) ? TRASH : 'trash:' + next);
+    } else if (!isVirtual(location) && location !== '/') navigate(parent(location));
+  }
   function newTab(destination = boot?.home || '') { const next = makeTab(destination); setTabs(previous => [...previous, next]); setActiveID(next.id); resetNavigation(); }
   function closeTab(id: string) {
     if (tabs.length === 1) { navigate(boot?.home || ''); return; }
@@ -276,6 +296,11 @@ export default function App() {
     setRefresh(v => v + 1);
   }
   function openEntry(entry: FileEntry) {
+    if (viewingTrash) {
+      if (entry.isDirectory && !entry.name.endsWith('.app')) navigate('trash:' + entry.path);
+      else run('正在预览…', () => api.quickLook(entry.path));
+      return;
+    }
     if (entry.isDirectory && !entry.name.endsWith('.app')) navigate(entry.path);
     else run('正在打开…', () => openFile(entry));
   }
@@ -285,11 +310,11 @@ export default function App() {
     setRecent(previous => [entry.path, ...previous.filter(p => p !== entry.path)].slice(0, 30));
   }
   function copy(cut: boolean, paths = [...selected]) {
-    if (!paths.length) return;
+    if (!paths.length || viewingTrash && cut) return;
     run(cut ? '正在剪切…' : '正在复制…', async () => { setClipboard(await api.clipboardSet(paths, cut)); }, `已${cut ? '剪切' : '复制'} ${paths.length} 个项目，请到目标文件夹粘贴`);
   }
   function paste(move = false) { if (writable) run('正在粘贴…', async () => { report(await api.paste(location, move), move ? '已移动' : '已粘贴'); setClipboard(await api.clipboardGet()); }); }
-  function undo() { if (undoLabel) run('正在撤销…', async () => report(await api.undo(), '已撤销')); }
+  function undo() { if (!viewingTrash && undoLabel) run('正在撤销…', async () => report(await api.undo(), '已撤销')); }
   function showModal(next: Modal) { setPopup(null); setModalError(''); setModal(next); setModalValue('name' in next ? next.name : ''); }
   function create(directory: boolean) {
     if (!writable) return;
@@ -303,7 +328,7 @@ export default function App() {
       setSelected(new Set([path])); setEditingName({ path, name });
     });
   }
-  function rename(entry = single) { if (entry) { setPopup(null); setEditingName({ path: entry.path, name: entry.name }); } }
+  function rename(entry = single) { if (entry && !viewingTrash) { setPopup(null); setEditingName({ path: entry.path, name: entry.name }); } }
   async function finishRename(name: string) {
     if (!editingName || operationLock.current) return;
     const editing = editingName;
@@ -323,9 +348,24 @@ export default function App() {
     setSelected(new Set());
   }
   function trash(paths = [...selected]) {
-    if (!paths.length || operationLock.current) return;
+    if (!paths.length || operationLock.current || viewingTrash) return;
     if (stored('skipTrashConfirmation', false)) void run('正在移到废纸篓…', () => moveToTrash(paths));
     else showModal({ kind: 'trash', paths });
+  }
+  function restoreTrash(paths = [...selected], choose = false) {
+    if (!paths.length) return;
+    void run('正在还原…', async () => {
+      setTrashOperationError('');
+      const result = await api.restoreTrash(paths, choose);
+      if (result) { setTrashOperationError(result.errors.map(item => `${base(item.path)}：${item.message}`).join('\n')); report(result, '已还原'); setSelected(new Set()); }
+    });
+  }
+  function clearTrash() {
+    void run('正在清空废纸篓…', async () => {
+      setTrashOperationError('');
+      const result = await api.emptyTrash();
+      if (result) { setTrashOperationError(result.errors.map(item => `${base(item.path)}：${item.message}`).join('\n')); report(result, '已永久删除'); setSelected(new Set()); navigate(TRASH); }
+    });
   }
   async function submitModal(skipTrashConfirmation = false) {
     if (!modal || (modal.kind === 'shortcuts' || modal.kind === 'archive') || operationLock.current) return;
@@ -442,6 +482,17 @@ export default function App() {
     event.stopPropagation();
     const paths = entry && !selected.has(entry.path) ? [entry.path] : [...selected];
     if (entry && !selected.has(entry.path)) setSelected(new Set([entry.path]));
+    if (viewingTrash) {
+      menuAt(event, [
+        ...(entry ? [{ label: '还原', disabled: !!operation, action: () => restoreTrash(paths) }, { label: '还原到…', disabled: !!operation, action: () => restoreTrash(paths, true) }] : []),
+        { label: '清空废纸篓…', icon: <Trash2/>, disabled: !!operation, action: clearTrash },
+        ...(entry ? [{ label: entry.isDirectory ? '打开' : '快速查看', icon: <FolderOpen/>, action: () => openEntry(entry) }, { label: '复制', icon: <Copy/>, action: () => copy(false, paths) }] : []),
+        { label: '刷新', icon: <RotateCw/>, action: refreshDirectory },
+        { label: hidden ? '不显示隐藏项目' : '显示隐藏的项目', checked: hidden, action: () => setHidden(v => !v) },
+        { label: places.some(place => place.path === TRASH) ? '从快速访问取消固定' : '固定到快速访问', icon: <Pin/>, action: () => togglePin(TRASH) },
+      ]);
+      return;
+    }
     const target = paths.length === 1 ? entry || single : null;
     const items: MenuItem[] = entry ? [
       { label: '打开', icon: <FolderOpen/>, action: () => openEntry(entry) },
@@ -522,7 +573,7 @@ export default function App() {
   }
   function drop(event: React.DragEvent, destination: string) {
     event.preventDefault(); event.stopPropagation(); setDragOver(null);
-    if (isVirtual(destination)) return;
+    if (isVirtual(destination) || viewingTrash && trashRoots.some(root => destination === root || destination.startsWith(root + '/'))) return;
     let paths: string[] = [];
     try { paths = JSON.parse(event.dataTransfer.getData('application/x-explorer-paths') || '[]'); } catch { /* External drop. */ }
     if (!paths.length) paths = Array.from(event.dataTransfer.files).map(file => api.filePath(file)).filter(Boolean);
@@ -565,7 +616,7 @@ export default function App() {
             t: () => newTab(), w: () => closeTab(tab.id),
             f: () => { searchRef.current?.focus(); searchRef.current?.select(); },
             o: () => single && openEntry(single), arrowdown: () => single && openEntry(single),
-            arrowup: () => { if (!isVirtual(location) && location !== '/') navigate(parent(location)); },
+            arrowup: goParent,
             '[': () => historyGo(-1), ']': () => historyGo(1),
             backspace: () => trash(), delete: () => trash(), i: () => toggleDetails(),
             y: () => single && run('正在预览…', () => api.quickLook(single.path)),
@@ -593,7 +644,7 @@ export default function App() {
       else if (key === 'f5' || ctrl && key === 'r') { event.preventDefault(); refreshDirectory(); }
       else if (event.altKey && key === 'arrowleft') { event.preventDefault(); historyGo(-1); }
       else if (event.altKey && key === 'arrowright') { event.preventDefault(); historyGo(1); }
-      else if (event.altKey && key === 'arrowup' || key === 'backspace' && !ctrl && !event.altKey && !event.shiftKey) { event.preventDefault(); if (!isVirtual(location) && location !== '/') navigate(parent(location)); }
+      else if (event.altKey && key === 'arrowup' || key === 'backspace' && !ctrl && !event.altKey && !event.shiftKey) { event.preventDefault(); goParent(); }
       else if (key === 'enter' && !event.altKey && !ctrl && single) { event.preventDefault(); rename(); }
       else if (key === ' ' && single) { event.preventDefault(); run('正在预览…', () => api.quickLook(single.path)); }
       else if (key === 'escape') { setSelected(new Set()); setSubmittedQuery(''); setQuery(''); }
@@ -722,7 +773,7 @@ export default function App() {
         className={`file-row ${selected.has(entry.path) ? 'selected' : ''} ${clipboard.cut && clipboard.paths.includes(entry.path) ? 'cut' : ''} ${dragOver === entry.path ? 'drop-target' : ''} ${entry.hidden ? 'hidden-file' : ''}`}
         onClick={event => select(entry, event)} onDoubleClick={() => openEntry(entry)} onContextMenu={event => contextMenu(event, entry)} draggable
         onDragStart={event => { const paths = selected.has(entry.path) ? [...selected] : [entry.path]; event.dataTransfer.setData('application/x-explorer-paths', JSON.stringify(paths)); event.dataTransfer.effectAllowed = 'copy'; setPopup(null); }}
-        onDragOver={event => { if (entry.isDirectory) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'copy'; setDragOver(entry.path); } }}
+        onDragOver={event => { if (entry.isDirectory && !viewingTrash) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'copy'; setDragOver(entry.path); } }}
         onDragLeave={() => setDragOver(null)} onDrop={event => { if (entry.isDirectory) drop(event, entry.path); }}>
         {checkboxes && <input className="item-checkbox" type="checkbox" aria-label={`选择 ${entry.name}`} checked={selected.has(entry.path)} onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onChange={event => { const checked = event.target.checked; setSelected(previous => { const next = new Set(previous); if (checked) next.add(entry.path); else next.delete(entry.path); return next; }); selectionAnchor.current = entry.path; }}/>}
         <div className="col-name"><FileGlyph entry={entry} dimension={view === 'icons' ? iconSize : view === 'tiles' ? 48 : view === 'content' ? 56 : 22}/>{editingName?.path === entry.path ? <InlineName key={editingName.path} name={editingName.name} directory={entry.isDirectory} onSave={finishRename} onCancel={() => { setEditingName(null); contentRef.current?.focus(); }}/> : <span className="entry-name" title={entry.name}>{displayName(entry)}{(view === 'tiles' || view === 'content') && <small>{type(entry)}{!entry.isDirectory && ` · ${size(entry.size)}`}</small>}{submittedQuery && <small>{parent(entry.path)}</small>}</span>}</div>
@@ -738,7 +789,7 @@ export default function App() {
       <div className="tabs" role="tablist" aria-label="文件夹标签页">
         {tabs.map(t => <div key={t.id} className={`tab ${t.id === tab.id ? 'current' : ''}`}>
           <button role="tab" aria-selected={t.id === tab.id} className="tab-label" onClick={() => { setActiveID(t.id); resetNavigation(); }} onAuxClick={event => { if (event.button === 1) closeTab(t.id); }}>
-            {isVirtual(t.location) ? <PlaceIcon icon={t.location} size={16}/> : <FolderGlyph dimension={21}/>}<span>{label(t.location)}</span>
+            {isVirtual(t.location) ? <PlaceIcon icon={isTrashLocation(t.location) ? 'trash' : t.location} size={16}/> : <FolderGlyph dimension={21}/>}<span>{label(t.location)}</span>
           </button>
           <button className="tab-close" aria-label={`关闭 ${label(t.location)} 标签页`} onClick={() => closeTab(t.id)}><X size={13}/></button>
         </div>)}
@@ -750,11 +801,11 @@ export default function App() {
       <div className="history-controls">
         <ToolButton label="后退 (⌘[)" disabled={tab.index === 0} onClick={() => historyGo(-1)}><ArrowLeft/></ToolButton>
         <ToolButton label="前进 (⌘])" disabled={tab.index >= tab.history.length - 1} onClick={() => historyGo(1)}><ArrowRight/></ToolButton>
-        <ToolButton label="向上一级 (Backspace / ⌘↑)" disabled={isVirtual(location) || location === '/'} onClick={() => navigate(parent(location))}><ArrowUp/></ToolButton>
+        <ToolButton label="向上一级 (Backspace / ⌘↑)" disabled={location === TRASH || !viewingTrash && (isVirtual(location) || location === '/')} onClick={goParent}><ArrowUp/></ToolButton>
         <ToolButton label="刷新 (F5)" onClick={refreshDirectory}><RotateCw className={loading ? 'spinning' : ''}/></ToolButton>
       </div>
       <div className={`address-bar ${editingAddress ? 'editing' : ''}`} onClick={editAddress}>
-        <span className="address-icon"><PlaceIcon icon={isVirtual(location) ? location : 'folder'} size={17}/></span>
+        <span className="address-icon"><PlaceIcon icon={viewingTrash ? 'trash' : isVirtual(location) ? location : 'folder'} size={17}/></span>
         {editingAddress ? <form onSubmit={event => { event.preventDefault(); goAddress(); }}><input ref={addressRef} aria-label="文件夹地址" value={address} onChange={event => setAddress(event.target.value)} onBlur={() => setEditingAddress(false)} onKeyDown={event => { if (event.key === 'Escape') setEditingAddress(false); }}/></form> : <div className="breadcrumbs">
           {isVirtual(location) ? <button onClick={editAddress}>{label(location)}</button> : breadcrumbs.map(crumb => <span key={crumb.path}><ChevronRight size={13}/><button title={crumb.path === location ? '单击编辑路径' : crumb.path} onClick={event => { if (crumb.path !== location) { event.stopPropagation(); navigate(crumb.path); } }}>{crumb.name}</button></span>)}
         </div>}
@@ -769,12 +820,12 @@ export default function App() {
     <div className="command-bar">
       <ToolButton label="新建" disabled={!writable || !!operation} className="text-tool" onClick={event => buttonMenu(event, [{ label: '文件夹', icon: <FolderPlus/>, shortcut: '⇧⌘N', action: () => create(true) }, { label: '文本文档', icon: <FilePlus2/>, action: () => create(false) }])}><Plus className="new-icon"/><span>新建</span><ChevronDown size={12}/></ToolButton>
       <span className="toolbar-separator"/>
-      <ToolButton label="剪切 (Ctrl+X)" disabled={!selected.size || !!operation} onClick={() => copy(true)}><Scissors className="scissors-icon"/></ToolButton>
+      <ToolButton label="剪切 (Ctrl+X)" disabled={viewingTrash || !selected.size || !!operation} onClick={() => copy(true)}><Scissors className="scissors-icon"/></ToolButton>
       <ToolButton label="复制 (⌘C)" disabled={!selected.size || !!operation} onClick={() => copy(false)}><Copy className="copy-icon"/></ToolButton>
       <ToolButton label="粘贴 (⌘V)" disabled={!writable || !clipboard.paths.length || !!operation} onClick={() => paste()}><ClipboardPaste/></ToolButton>
-      <ToolButton label="重命名 (Return)" disabled={!single || !!operation} onClick={() => rename()}><TextCursorInput className="rename-icon"/></ToolButton>
+      <ToolButton label="重命名 (Return)" disabled={viewingTrash || !single || !!operation} onClick={() => rename()}><TextCursorInput className="rename-icon"/></ToolButton>
       <ToolButton label="共享" disabled={!selected.size} onClick={() => run('共享文件…', () => api.share([...selected]))}><Share2/></ToolButton>
-      <ToolButton label="移到废纸篓 (⌘⌫)" disabled={!selected.size || !!operation} onClick={() => trash()}><Trash2/></ToolButton>
+      <ToolButton label="移到废纸篓 (⌘⌫)" disabled={viewingTrash || !selected.size || !!operation} onClick={() => trash()}><Trash2/></ToolButton>
       <span className="toolbar-separator"/>
       <ToolButton label="排序" className="text-tool" onClick={event => buttonMenu(event, sortMenu)}><ArrowDownWideNarrow/><span>排序</span><ChevronDown size={12}/></ToolButton>
       <ToolButton label="查看" className="text-tool" onClick={event => buttonMenu(event, viewMenu)}><List/><span>查看</span><ChevronDown size={12}/></ToolButton>
@@ -799,7 +850,7 @@ export default function App() {
         </div>
         <div className="nav-divider"/>
         <div className="sidebar-section" aria-label="快速访问">
-          {places.map(place => <NavigationTree key={place.path} place={{ ...place, name: label(place.path) }} location={location} hidden={hidden} pinned navigate={navigate} newTab={newTab} drop={drop}
+          {places.map(place => place.path === TRASH ? <button key={TRASH} className={`nav-item ${viewingTrash ? 'current' : ''}`} onClick={() => navigate(TRASH)} onAuxClick={event => { if (event.button === 1) newTab(TRASH); }} onContextMenu={event => menuAt(event, [{ label: '在新标签页中打开', action: () => newTab(TRASH) }, { label: '从快速访问取消固定', icon: <Pin/>, action: () => togglePin(TRASH) }])}><PlaceIcon icon="trash"/><span>废纸篓</span><Pin size={12} className="pin-mark"/></button> : <NavigationTree key={place.path} place={{ ...place, name: label(place.path) }} location={location} hidden={hidden} pinned navigate={navigate} newTab={newTab} drop={drop}
             context={(event, target) => menuAt(event, [{ label: '在新标签页中打开', icon: <Plus/>, action: () => newTab(target.path) }, terminalItem(target.path), { label: places.some(place => place.path === target.path) ? '从快速访问取消固定' : '固定到快速访问', icon: <Pin/>, action: () => togglePin(target.path) }])}/>)}
         </div>
         <div className="nav-divider"/>
@@ -808,13 +859,15 @@ export default function App() {
       </nav>}
 
       <main className={`main-pane ${details || previewPane ? 'has-details' : ''}`}>
+        {viewingTrash && trashOperationError && !error && <div className="error-bar" role="alert"><Info size={17}/><span>{trashOperationError}</span><button aria-label="关闭操作错误提示" onClick={() => setTrashOperationError('')}><X size={15}/></button></div>}
         {error && <div className="error-bar" role="alert"><Info size={17}/><span>{error}</span><button title="关闭提示" aria-label="关闭错误提示" onClick={() => setError('')}><X size={15}/></button></div>}
+        {viewingTrash && <div className="search-summary"><Trash2 size={16}/><span>废纸篓</span><small>还原到原位置；无法确定原位置时选择文件夹</small><button className="secondary-button" disabled={!selected.size || !!operation} onClick={() => restoreTrash()}>还原</button><button className="secondary-button" disabled={!!operation} onClick={clearTrash}>清空废纸篓…</button></div>}
         {submittedQuery && <div className="search-summary"><Search size={16}/><span>“{submittedQuery}” 的搜索结果</span><small>{loading ? '正在搜索子文件夹…' : searchNote || `${visible.length} 个匹配项目`}</small><button onClick={() => { setQuery(''); setSubmittedQuery(''); }}>退出搜索</button></div>}
         <div ref={contentRef} tabIndex={0} className={`file-content view-${view} ${dragOver === location ? 'drop-target' : ''}`} aria-label={label(location)} aria-busy={loading}
           onPointerDown={startMarquee} onClickCapture={event => { if (suppressMarqueeClick.current) { event.preventDefault(); event.stopPropagation(); suppressMarqueeClick.current = false; } }}
           onContextMenu={event => contextMenu(event)}
           onDragOver={event => { if (writable) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDragOver(location); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragOver(null); }} onDrop={event => drop(event, location)}>
-          {location === PC && !submittedQuery ? <div className="computer-content"><h2><ChevronDown size={14}/>设备和驱动器（{boot?.volumes.length || 0}）</h2><div className="drive-grid">{boot?.volumes.map(volume => <button className="drive-card" key={volume.path} onDoubleClick={() => navigate(volume.path)} onKeyDown={event => { if (event.key === 'Enter') navigate(volume.path); }}><HardDrive size={49} strokeWidth={1.2}/><span><strong>{volume.name}</strong><span className="storage-track"><span style={{ width: `${Math.max(0, Math.min(100, (1 - volume.free / volume.total) * 100))}%` }}/></span><small>{size(volume.free)} 可用，共 {size(volume.total)}</small></span></button>)}</div></div> : loading ? <Loading/> : visible.length ? fileRows() : <div className="empty-state">{submittedQuery ? <Search size={42} strokeWidth={1.2}/> : <FolderGlyph dimension={68}/>}<h2>{error ? '无法显示此位置' : submittedQuery ? '没有找到匹配的项目' : '此文件夹为空'}</h2><p>{error ? '检查访问权限，或返回上一个文件夹。' : submittedQuery ? '尝试其他名称，或到上一级文件夹中搜索。' : '将文件拖到这里，或使用“新建”创建文件夹。'}</p>{error && <button className="secondary-button" onClick={() => setRefresh(v => v + 1)}>重试</button>}</div>}
+          {location === PC && !submittedQuery ? <div className="computer-content"><h2><ChevronDown size={14}/>设备和驱动器（{boot?.volumes.length || 0}）</h2><div className="drive-grid">{boot?.volumes.map(volume => <button className="drive-card" key={volume.path} onDoubleClick={() => navigate(volume.path)} onKeyDown={event => { if (event.key === 'Enter') navigate(volume.path); }}><HardDrive size={49} strokeWidth={1.2}/><span><strong>{volume.name}</strong><span className="storage-track"><span style={{ width: `${Math.max(0, Math.min(100, (1 - volume.free / volume.total) * 100))}%` }}/></span><small>{size(volume.free)} 可用，共 {size(volume.total)}</small></span></button>)}</div></div> : loading ? <Loading/> : visible.length ? fileRows() : <div className="empty-state">{submittedQuery ? <Search size={42} strokeWidth={1.2}/> : <FolderGlyph dimension={68}/>}<h2>{error ? '无法显示此位置' : submittedQuery ? '没有找到匹配的项目' : viewingTrash ? '废纸篓为空' : '此文件夹为空'}</h2><p>{error ? '检查访问权限，或返回上一个文件夹。' : submittedQuery ? '尝试其他名称，或到上一级文件夹中搜索。' : viewingTrash ? '这里显示废纸篓中的项目。' : '将文件拖到这里，或使用“新建”创建文件夹。'}</p>{error && <button className="secondary-button" onClick={() => setRefresh(v => v + 1)}>重试</button>}</div>}
           {selectionBox && <div className="selection-marquee" style={selectionBox} aria-hidden="true"/>}
         </div>
       </main>

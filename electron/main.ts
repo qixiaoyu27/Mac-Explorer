@@ -11,6 +11,7 @@ import { compressArchive, extractArchive, prepareArchiveFile, previewArchive } f
 import { isArchive } from '../shared/archives';
 import { FileHistory } from './history';
 import { FileIcons } from './icons';
+import { listTrash, TrashOrigins, snapshotTrash, emptyTrash } from './trash';
 import type { Bootstrap, ClipboardInfo, OperationResult, Place, Preview, ThemeMode, Volume } from '../shared/types';
 
 let window: BrowserWindow | null = null;
@@ -96,6 +97,7 @@ async function bootstrap(): Promise<Bootstrap> {
     { name: '视频', path: path.join(home, 'Movies'), icon: 'video' },
   ];
   const places = (await Promise.all(candidates.map(async place => (await fs.stat(place.path).catch(() => null))?.isDirectory() ? place : null))).filter((p): p is Place => p !== null);
+  places.push({ name: '废纸篓', path: 'trash', icon: 'trash' });
   const mounted = await fs.readdir('/Volumes').catch(() => [] as string[]);
   const volumePaths = ['/', ...mounted.filter(name => name !== 'Macintosh HD').map(name => '/Volumes/' + name)];
   const volumes: Volume[] = [];
@@ -111,6 +113,61 @@ async function bootstrap(): Promise<Bootstrap> {
   return { theme: nativeTheme.themeSource, home, places, volumes, initialPath: testRoot ? path.join(testRoot, 'Documents') : process.env.EXPLORER_START_PATH };
 }
 ipc('bootstrap', bootstrap);
+const trashOrigins = new TrashOrigins(path.join(app.getPath('userData'), 'trash-origins'));
+async function trashRoots() {
+  const home = testRoot || os.homedir();
+  const volumes = testRoot ? path.join(testRoot, 'Volumes') : '/Volumes';
+  const mounted = await fs.readdir(volumes).catch(() => [] as string[]);
+  const roots = [path.join(home, '.Trash'), ...mounted.map(name => path.join(volumes, name, '.Trashes', String(process.getuid!())))];
+  return roots;
+}
+ipc('list-trash', async (directory?: string) => listTrash(await trashRoots(), directory));
+ipc('restore-trash', async (inputs: unknown, choose: unknown = false) => {
+  const paths = pathsArg(inputs);
+  let destination: string | undefined;
+  const origins = await Promise.all(paths.map(input => trashOrigins.original(input)));
+  const missing = (await Promise.all(origins.map(async origin => !origin || !(await fs.stat(path.dirname(origin)).catch(() => null))?.isDirectory()))).some(Boolean);
+  if (choose === true || missing) {
+    const picked = await dialog.showOpenDialog(window!, { title: missing ? '无法确定原位置，请选择还原文件夹' : '还原到…', buttonLabel: '还原到此处', properties: ['openDirectory', 'createDirectory'] });
+    if (picked.canceled || !picked.filePaths[0]) return null;
+    destination = picked.filePaths[0];
+  }
+  const result = await trashOrigins.restore(await trashRoots(), paths, destination);
+  if (result.succeeded.length) history.clear();
+  return result;
+});
+let emptyingTrash = false;
+ipc('empty-trash', async () => {
+  if (emptyingTrash) throw new Error('废纸篓正在处理中。');
+  emptyingTrash = true;
+  try {
+    const roots = await trashRoots();
+    const snapshot = await snapshotTrash(roots);
+    if (!snapshot.length) return { succeeded: [], errors: [] };
+    const answer = await dialog.showMessageBox(window!, { type: 'warning', title: '清空废纸篓', message: `永久删除废纸篓中的 ${snapshot.length} 个项目？`, detail: '包含本机及已连接磁盘的废纸篓。此操作无法撤销。确认后新加入的顶层项目将保留。', buttons: ['取消', '永久删除'], defaultId: 0, cancelId: 0, noLink: true });
+    if (answer.response !== 1) return null;
+    const result = await emptyTrash(roots, snapshot);
+    if (result.succeeded.length) history.clear();
+    return result;
+  } finally { emptyingTrash = false; }
+});
+async function moveToSystemTrash(input: string) {
+  const source = protect(input);
+  let trashed: string;
+  if (testRoot) {
+    // Isolated test instances must never write to the user's actual Trash.
+    const root = path.join(testRoot, '.Trash');
+    await fs.mkdir(root, { recursive: true });
+    trashed = path.join(root, path.basename(source));
+    await moveNoReplace(source, trashed);
+  } else {
+    const helper = path.join(__dirname.replace(/app\.asar(?=\/)/, 'app.asar.unpacked'), 'native/trash-item');
+    const { stdout } = await promisify(execFile)(helper, [source]);
+    trashed = absolute(JSON.parse(stdout).path);
+  }
+  try { await trashOrigins.remember(trashed, source); }
+  catch { throw new Error('文件已移入废纸篓，但无法保存原位置。请在废纸篓使用“还原到…”恢复。'); }
+}
 ipc('take-open-paths', () => openPaths.splice(0));
 function isThemeMode(value: unknown): value is ThemeMode { return value === 'light' || value === 'dark' || value === 'system'; }
 ipc('set-theme', async (mode: unknown) => {
@@ -254,7 +311,7 @@ ipc('rename', async (input: string, name: string) => {
 ipc('trash', async (inputs: unknown): Promise<OperationResult> => {
   const result: OperationResult = { succeeded: [], errors: [] };
   for (const input of pathsArg(inputs)) {
-    try { await shell.trashItem(protect(input)); result.succeeded.push(input); }
+    try { await moveToSystemTrash(input); result.succeeded.push(input); }
     catch (error) { result.errors.push({ path: input, message: readableError(error) }); }
   }
   if (result.succeeded.length) history.clear();
@@ -277,7 +334,7 @@ ipc('copy-to', async (inputs: unknown, parent: string) => {
   await history.record('复制', result.changes || []); return result;
 });
 ipc('history', () => history.label);
-ipc('undo', () => history.undo(moveNoReplace, input => shell.trashItem(protect(input))));
+ipc('undo', () => history.undo(moveNoReplace, input => moveToSystemTrash(input)));
 ipc('copy-text', (value: string) => clipboard.writeText(String(value)));
 ipc('choose-folder', async () => {
   const result = await dialog.showOpenDialog(window!, { title: '选择要打开的文件夹', properties: ['openDirectory'] });

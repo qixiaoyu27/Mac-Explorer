@@ -16,6 +16,12 @@ if (!fs.existsSync(binary) || Math.max(fs.statSync(source).mtimeMs, fs.statSync(
   execFileSync('xcrun', ['swiftc', '-target', 'arm64-apple-macos13.0', '-O', source, '-o', binary], { stdio: 'inherit' });
   execFileSync('codesign', ['--force', '--sign', '-', binary], { stdio: 'inherit' });
 }
+const trashSource = 'electron/native/TrashItem.swift';
+const trashBinary = 'dist-electron/native/trash-item';
+if (!fs.existsSync(trashBinary) || fs.statSync(trashSource).mtimeMs > fs.statSync(trashBinary).mtimeMs) {
+  execFileSync('xcrun', ['swiftc', '-target', 'arm64-apple-macos13.0', '-O', trashSource, '-o', trashBinary], { stdio: 'inherit' });
+  execFileSync('codesign', ['--force', '--sign', '-', trashBinary], { stdio: 'inherit' });
+}
 const archiveSource = 'electron/native/ArchiveReader.c';
 const archiveBinary = 'dist-electron/native/archive-reader';
 if (!fs.existsSync(archiveBinary) || Math.max(fs.statSync(archiveSource).mtimeMs, fs.statSync('scripts/build-electron.mjs').mtimeMs) > fs.statSync(archiveBinary).mtimeMs) {

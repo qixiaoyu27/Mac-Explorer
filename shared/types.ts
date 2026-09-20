@@ -7,6 +7,7 @@ export interface Volume extends Place { total: number; free: number }
 export type ThemeMode = 'light' | 'dark' | 'system';
 export interface Bootstrap { theme: ThemeMode; home: string; places: Place[]; volumes: Volume[]; initialPath?: string }
 export interface Listing { path: string; entries: FileEntry[] }
+export interface TrashListing { entries: FileEntry[]; roots: string[]; unavailable: string[] }
 export interface SearchResult { entries: FileEntry[]; truncated: boolean; skipped: number }
 export interface FileChange { from?: string; to: string }
 export interface OperationResult { succeeded: string[]; errors: { path: string; message: string }[]; changes?: FileChange[] }
@@ -16,6 +17,9 @@ export type ExtractMode = 'choose' | 'here' | 'folder';
 export interface ArchivePreview { path: string; name: string; entries: { path: string; directory: boolean; size: number }[] }
 export interface ExplorerAPI {
   bootstrap(): Promise<Bootstrap>;
+  listTrash(directory?: string): Promise<TrashListing>;
+  restoreTrash(paths: string[], choose?: boolean): Promise<OperationResult | null>;
+  emptyTrash(): Promise<OperationResult | null>;
   takeOpenPaths(): Promise<string[]>;
   onOpenPaths(callback: () => void): () => void;
   setTheme(mode: ThemeMode): Promise<ThemeMode>;
