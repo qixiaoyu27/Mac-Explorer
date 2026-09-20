@@ -30,7 +30,7 @@ Mac Explorer 面向习惯 Windows 文件资源管理器的 Mac 用户：熟悉�
 打开 macOS 的「终端」，复制并执行：
 
 ```sh
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/9f1bb4d3570377545644b8afd65017002ab35f48/scripts/install.sh)"
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/703d16c336dee0cb63d22b702a05da90d5833715/scripts/install.sh)"
 ```
 
 如果 Mac Explorer 让你用 Mac 更顺手，欢迎到 [GitHub 点个 ⭐ Star](https://github.com/qixiaoyu27/Mac-Explorer)，支持项目持续更新！
@@ -49,7 +49,7 @@ Mac Explorer 面向习惯 Windows 文件资源管理器的 Mac 用户：熟悉�
 如果你信任本项目，并同意移除 **Mac Explorer 这一个应用**的下载隔离标记，可以直接使用这一行：
 
 ```sh
-MAC_EXPLORER_ALLOW_UNNOTARIZED=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/9f1bb4d3570377545644b8afd65017002ab35f48/scripts/install.sh)"
+MAC_EXPLORER_ALLOW_UNNOTARIZED=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/703d16c336dee0cb63d22b702a05da90d5833715/scripts/install.sh)"
 ```
 
 它将下载、校验、移除该应用的隔离标记、安装和启动合并执行。SHA-256 和应用签名校验仍然保留，校验失败就停止；不需要 `sudo`，不关闭系统 Gatekeeper，也不修改其他应用。这不是 Apple 公证或安全背书，系统其他安全检查仍可能拦截。若系统明确提示恶意软件，请勿使用此方式继续运行。
