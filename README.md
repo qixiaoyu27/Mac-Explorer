@@ -63,7 +63,7 @@ xattr -dr com.apple.quarantine "/Applications/Mac Explorer.app"
 每次发布附带 `SHA256SUMS.txt`。在下载目录运行以下命令，并将输出与同一 Release 中的校验文件对照：
 
 ```sh
-shasum -a 256 Mac-Explorer-0.1.29-mac-arm64.dmg
+shasum -a 256 Mac-Explorer-0.1.30-mac-arm64.dmg
 ```
 
 使用 ZIP 时，对 ZIP 文件执行相同校验即可。
@@ -134,6 +134,8 @@ ZIP、TAR.GZ、7z 已通过测试；其他格式（包括 RAR）取决于 macOS 
 | 个人文件夹 / 桌面 / 文档 / 下载 / 此电脑 | ⇧⌘H / ⇧⌘D / ⇧⌘O / ⌥⌘L / ⇧⌘C |
 
 保留 Ctrl+C / X / V、F2 重命名、F5 刷新等兼容快捷键。文件列表中 Backspace 返回上一级，Delete 不执行删除；⌘X 仅用于输入框内剪切文字。
+
+文件区域支持触控板双指横向滑动前进、后退：macOS 自然滚动开启时，向右滑后退、向左滑前进。一次滑动只跳转一级；可横向滚动的列表优先滚动，编辑文字或打开弹窗、菜单时不触发导航。
 
 ## 与其他应用配合
 

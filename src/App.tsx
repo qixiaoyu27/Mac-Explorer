@@ -610,6 +610,59 @@ export default function App() {
     window.addEventListener('keydown', keydown); return () => window.removeEventListener('keydown', keydown);
   });
   useEffect(() => { if (editingAddress) { addressRef.current?.focus(); addressRef.current?.select(); } }, [editingAddress]);
+  const swipeNavigation = useRef({ historyGo, blocked: false, context: '' });
+  swipeNavigation.current = {
+    historyGo, blocked: !!(modal || popup || operation || editingName || editingAddress),
+    context: `${tab.id}:${tab.index}:${location}`,
+  };
+  useEffect(() => {
+    // Wheel events include trackpad momentum. Keep the gesture latched across
+    // navigation/renders until the stream has been quiet for 250 ms.
+    let lastEvent = -Infinity;
+    let distanceX = 0; let distanceY = 0;
+    let mode: 'pending' | 'horizontal' | 'ignored' | 'done' = 'pending';
+    let context = '';
+    const swipe = (event: WheelEvent) => {
+      const current = swipeNavigation.current;
+      const now = performance.now();
+      if (now - lastEvent > 250) {
+        distanceX = 0; distanceY = 0; mode = 'pending'; context = current.context;
+      }
+      lastEvent = now;
+      const target = event.target instanceof Element ? event.target : null;
+      const content = contentRef.current;
+      const editable = (element: Element | null) => !!element?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
+      if (current.blocked || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.deltaMode !== 0 ||
+        !content || !target || !content.contains(target) || editable(target) || editable(document.activeElement)) {
+        mode = 'ignored'; return;
+      }
+      if (mode === 'done') { event.preventDefault(); return; }
+      if (context !== current.context) mode = 'ignored';
+      if (mode === 'ignored') return;
+      // A horizontally scrollable list owns the entire gesture, including at
+      // its edges, so scrolling to the last column never changes directories.
+      if (mode === 'pending') {
+        for (let element: Element | null = target; element; element = element.parentElement) {
+          if (element.scrollWidth > element.clientWidth + 1 && /^(auto|scroll)$/.test(getComputedStyle(element).overflowX)) {
+            mode = 'ignored'; return;
+          }
+          if (element === content) break;
+        }
+      }
+      distanceX += event.deltaX; distanceY += Math.abs(event.deltaY);
+      if (mode === 'pending') {
+        if (Math.max(Math.abs(distanceX), distanceY) < 10) return;
+        if (Math.abs(distanceX) <= distanceY * 1.5) { mode = 'ignored'; return; }
+        mode = 'horizontal';
+      }
+      event.preventDefault();
+      if (Math.abs(distanceX) < 90) return;
+      mode = 'done';
+      current.historyGo(distanceX < 0 ? -1 : 1);
+    };
+    document.addEventListener('wheel', swipe, { passive: false });
+    return () => document.removeEventListener('wheel', swipe);
+  }, []);
   useEffect(() => {
     const element = contentRef.current;
     const zoomIcons = (event: WheelEvent) => {
