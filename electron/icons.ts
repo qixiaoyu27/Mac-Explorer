@@ -1,3 +1,4 @@
+import { t as tr } from '../shared/i18n';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { stat } from 'node:fs/promises';
@@ -18,7 +19,7 @@ export class FileIcons {
     if (cached) return cached;
     const result = new Promise<string>((resolve, reject) => {
       const worker = this.start(); const id = ++this.nextID;
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('图标读取超时')); }, 30_000);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(tr('图标读取超时'))); }, 30_000);
       this.pending.set(id, { resolve, reject, timer });
       worker.stdin.write(JSON.stringify({ id, path: filePath, pixels }) + '\n', error => {
         if (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
@@ -42,13 +43,13 @@ export class FileIcons {
         if (!request) return;
         this.pending.delete(response.id); clearTimeout(request.timer);
         if (typeof response.data === 'string' && response.data.startsWith('data:image/png;base64,')) request.resolve(response.data);
-        else request.reject(new Error(response.error || '无法读取图标'));
+        else request.reject(new Error(tr(response.error || '无法读取图标')));
       } catch { /* Ignore non-protocol output without accepting it as image data. */ }
     });
     const failed = () => {
       if (this.worker !== worker) return;
       this.worker = undefined;
-      for (const request of this.pending.values()) { clearTimeout(request.timer); request.reject(new Error('原生图标服务已停止')); }
+      for (const request of this.pending.values()) { clearTimeout(request.timer); request.reject(new Error(tr('原生图标服务已停止'))); }
       this.pending.clear();
     };
     worker.on('error', failed); worker.on('exit', failed);

@@ -189,6 +189,7 @@ h2 { font-weight: 500; }
 .error-bar > span { flex: 1; white-space: pre-line; line-height: 1.65; user-select: text; }
 .error-bar > svg { margin-top: 2px; }
 .error-bar button { width: 23px; height: 23px; border-radius: 3px; }
+.error-bar .permission-settings-button { width: auto; height: auto; min-height: 26px; padding: 3px 10px; flex-shrink: 0; white-space: nowrap; border: 1px solid currentColor; color: inherit; }
 .search-summary { padding: 12px 24px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border, #ececec); font-size: 12px; }
 .search-summary > svg { color: #567b98; }
 .search-summary small { color: var(--text-secondary, #747474); font-size: 11px; flex: 1; }

@@ -3,6 +3,9 @@ import type { ExplorerAPI } from '../shared/types';
 
 const api: ExplorerAPI = {
   bootstrap: () => ipcRenderer.invoke('bootstrap'),
+  setLanguage: mode => ipcRenderer.invoke('set-language', mode),
+  onLanguageChanged: callback => { const listener = (_event: unknown, state: import('../shared/i18n').LanguageState) => callback(state); ipcRenderer.on('language-changed', listener); return () => ipcRenderer.removeListener('language-changed', listener); },
+  openPrivacySettings: () => ipcRenderer.invoke('open-privacy-settings'),
   volumes: () => ipcRenderer.invoke('volumes'),
   ejectVolume: path => ipcRenderer.invoke('eject-volume', path),
   listTrash: directory => ipcRenderer.invoke('list-trash', directory),

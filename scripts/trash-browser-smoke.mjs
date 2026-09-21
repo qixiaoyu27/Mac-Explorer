@@ -45,5 +45,17 @@ try {
   await page.getByRole('button', { name: '刷新 (F5)', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: '部分回收站无法读取' }).waitFor();
   assert.equal(await page.getByText('回收站为空', { exact: true }).count(), 0);
+  await app.evaluate(({ shell }) => {
+    globalThis.openedSettingsURLs = [];
+    shell.openExternal = async url => { globalThis.openedSettingsURLs.push(url); };
+  });
+  await page.getByRole('button', { name: '前往设置', exact: true }).click();
+  assert.deepEqual(await app.evaluate(() => globalThis.openedSettingsURLs), ['x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles']);
+  await page.getByRole('alert').filter({ hasText: '部分回收站无法读取' }).waitFor();
+  await page.screenshot({ path: 'artifacts/trash-permission-settings-fixture.png' });
+  await app.evaluate(({ shell }) => { shell.openExternal = async () => { throw new Error('fixture failure'); }; });
+  await page.getByRole('button', { name: '前往设置', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: '无法打开系统设置，请手动前往' }).waitFor();
+
   console.log('PASS: default trash shortcut, merged volume entries, folder/history navigation, readonly guards, persistent unpin/repin, fixture content preserved.');
 } finally { await app.close(); await fs.rm(root, { recursive: true, force: true }); }

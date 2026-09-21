@@ -26,14 +26,15 @@ if [[ -e "$destination" ]]; then
   [[ "$identity" == local.macexplorer.desktop ]] || fail '目标位置存在其他应用，未作修改。'
 fi
 app_running() { pgrep -f '/Mac Explorer[.]app/Contents/MacOS/Mac Explorer($| )' >/dev/null; }
-app_running && fail '请先退出 Mac Explorer，再重新运行此命令。'
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/mac-explorer-download.XXXXXX")
 stage=''
 backup=''
 installed=0
+download_pid=''
 cleanup() {
   status=$?
+  if [[ -n "$download_pid" ]]; then kill "$download_pid" 2>/dev/null || true; wait "$download_pid" 2>/dev/null || true; fi
   if [[ "$installed" == 0 && -n "$backup" && ! -e "$destination" && -d "$backup" ]]; then
     mv "$backup" "$destination" || printf '旧版本保留在：%s\n' "$backup" >&2
   fi
@@ -46,6 +47,46 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 fetch() { curl --fail --location --silent --show-error --retry 2 --connect-timeout 15 --max-time 600 --proto '=https' --tlsv1.2 "$1" -o "$2"; }
 
+# Compare numeric release components; never replace a newer local build.
+version_compare() {
+  awk -v local_version="$1" -v remote_version="$2" 'BEGIN {
+    split(local_version,a,"."); split(remote_version,b,".");
+    for(i=1;i<=3;i++) { if(a[i]+0>b[i]+0) {print 1;exit} if(a[i]+0<b[i]+0) {print -1;exit} }
+    print 0
+  }'
+}
+show_progress() {
+  local current total line
+  current=$(stat -f%z "$work/$archive" 2>/dev/null || printf 0)
+  # Redirects and retries may append multiple responses. Only use the last one's length.
+  total=$(awk 'toupper($1) ~ /^HTTP\// {n=0} tolower($1)=="content-length:" {gsub("\r","",$2);n=$2} END {print n+0}' "$work/headers")
+  line=$(awk -v n="$current" -v total="$total" -v done="$1" 'BEGIN {
+    if(done) total=n;
+    if(total>0) {p=100*n/total;if(!done && p>99)p=99;printf "【%.2f MiB】/【%.2f MiB】   【%.0f%%】", n/1048576,total/1048576,p}
+    else printf "【%.2f MiB】/【总大小待确认】   【--%%】", n/1048576
+  }')
+  if [[ -t 1 ]]; then printf '\r%s\033[K' "$line"; else printf '%s\n' "$line"; fi
+}
+download_archive() {
+  : > "$work/headers"
+  curl --fail --location --silent --show-error --retry 2 --connect-timeout 15 --max-time 600 --proto '=https' --tlsv1.2 --dump-header "$work/headers" "$1" -o "$work/$archive" &
+  download_pid=$!
+  local tick=0
+  while kill -0 "$download_pid" 2>/dev/null; do
+    if [[ -t 1 || $((tick % 5)) == 0 ]]; then show_progress 0; fi
+    sleep 1
+    tick=$((tick + 1))
+  done
+  if ! wait "$download_pid"; then
+    download_pid=''
+    printf '\n' >&2
+    fail '下载未完成，请检查网络后重试；原安装未作修改。'
+  fi
+  download_pid=''
+  show_progress 1
+  [[ ! -t 1 ]] || printf '\n'
+}
+
 printf '正在查询最新版…\n'
 fetch "$repo/releases/latest/download/SHA256SUMS.txt" "$work/checksums"
 entry=$(awk 'length($1)==64 && $1 !~ /[^[:xdigit:]]/ && $2 ~ /^Mac-Explorer-[0-9]+\.[0-9]+\.[0-9]+-mac-arm64\.zip$/ { print $1 " " $2 }' "$work/checksums")
@@ -54,9 +95,19 @@ expected=${entry%% *}
 archive=${entry#* }
 version=${archive#Mac-Explorer-}
 version=${version%-mac-arm64.zip}
+if [[ -e "$destination" ]]; then
+  current_version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$destination/Contents/Info.plist" 2>/dev/null || true)
+  [[ "$current_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail '无法识别已安装版本，未作修改。'
+  printf '已安装：v%s · 最新版：v%s\n' "$current_version" "$version"
+  comparison=$(version_compare "$current_version" "$version")
+  if [[ "$comparison" == 0 ]]; then printf '已是最新版，无需下载安装。\n'; exit 0; fi
+  if [[ "$comparison" == 1 ]]; then printf '本地版本较新，保留当前安装，不降级。\n'; exit 0; fi
+  printf '发现新版本，准备更新…\n'
+fi
+app_running && fail '请先退出 Mac Explorer，再重新运行此命令完成更新。'
 printf '正在下载 Mac Explorer %s…\n' "$version"
 # Pin the ZIP to the version selected from the checksum file, even during a new release.
-fetch "$repo/releases/download/v$version/$archive" "$work/$archive"
+download_archive "$repo/releases/download/v$version/$archive"
 actual=$(shasum -a 256 "$work/$archive" | awk '{print $1}')
 [[ "$actual" == "$expected" ]] || fail '下载校验不一致，原安装未作修改。'
 printf '校验通过，正在准备安装…\n'

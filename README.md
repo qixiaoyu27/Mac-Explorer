@@ -25,12 +25,12 @@ Mac Explorer 面向习惯 Windows 文件资源管理器的 Mac 用户：熟悉�
 
 ## 下载与安装
 
-### 一行命令安装（推荐）
+### 一行命令安装或更新（推荐）
 
 打开 macOS 的「终端」，复制并执行：
 
 ```sh
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/refs/tags/v0.1.36/scripts/install.sh)"
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/refs/tags/v0.1.37/scripts/install.sh)"
 ```
 
 如果 Mac Explorer 让你用 Mac 更顺手，欢迎到 [GitHub 点个 ⭐ Star](https://github.com/qixiaoyu27/Mac-Explorer)，支持项目持续更新！
@@ -40,7 +40,8 @@ Mac Explorer 面向习惯 Windows 文件资源管理器的 Mac 用户：熟悉�
 无需安装 npm、Node.js 或 Homebrew，也不需要 `sudo`。命令会下载并运行[本仓库的安装脚本](scripts/install.sh)，自动获取最新版本、校验 SHA-256 和应用签名，安装后启动应用。
 
 - 首次默认安装到个人应用程序目录 `~/Applications`；若已有 `/Applications/Mac Explorer.app`，则在该位置更新，需要目录可写。
-- 更新时先退出 Mac Explorer，再执行同一命令。旧版本备份在安装目录的 `.Mac Explorer Backups` 中，已有偏好设置保留。
+- 再次执行同一命令会检查更新：已是最新版则跳过下载，发现新版才安装，不会降级较新的本地版本。需要更新时请先退出 Mac Explorer。旧版本备份在安装目录的 `.Mac Explorer Backups` 中，已有偏好设置保留。
+- 下载时显示 `【已下载 MiB】/【总大小 MiB】 【进度百分比】`；网络尚未返回总大小时显示待确认，下载失败不会替换已有应用。
 - 默认保留下载隔离标记。如被系统拦截，请参考下方首次打开说明或选择下面的可选命令。
 - GitHub 连接失败时可重试，或使用下面的手动下载安装方式。
 
@@ -49,7 +50,7 @@ Mac Explorer 面向习惯 Windows 文件资源管理器的 Mac 用户：熟悉�
 如果你信任本项目，并同意移除 **Mac Explorer 这一个应用**的下载隔离标记，可以直接使用这一行：
 
 ```sh
-MAC_EXPLORER_ALLOW_UNNOTARIZED=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/refs/tags/v0.1.36/scripts/install.sh)"
+MAC_EXPLORER_ALLOW_UNNOTARIZED=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/refs/tags/v0.1.37/scripts/install.sh)"
 ```
 
 它将下载、校验、移除该应用的隔离标记、安装和启动合并执行。SHA-256 和应用签名校验仍然保留，校验失败就停止；不需要 `sudo`，不关闭系统 Gatekeeper，也不修改其他应用。这不是 Apple 公证或安全背书，系统其他安全检查仍可能拦截。若系统明确提示恶意软件，请勿使用此方式继续运行。
@@ -94,7 +95,7 @@ xattr -dr com.apple.quarantine "/Applications/Mac Explorer.app"
 每次发布附带 `SHA256SUMS.txt`。在下载目录运行以下命令，并将输出与同一 Release 中的校验文件对照：
 
 ```sh
-shasum -a 256 Mac-Explorer-0.1.36-mac-arm64.dmg
+shasum -a 256 Mac-Explorer-0.1.37-mac-arm64.dmg
 ```
 
 使用 ZIP 时，对 ZIP 文件执行相同校验即可。
@@ -252,3 +253,7 @@ docs/images/  使用演示文件拍摄的应用截图
 以 [GNU GPL v3](LICENSE) 开源。基于 Electron、React、Lucide 和 macOS 原生能力构建。
 
 外观与交互受 Windows 11 File Explorer 启发，归档流程参考 WinRAR 使用习惯。Mac Explorer 与 Microsoft、Apple、WinRAR 均无隶属或官方合作关系。
+
+### 界面语言
+
+在工具栏 **更多（…）→ 语言** 中选择 **简体中文 / 繁體中文 / English / 跟随系统**。切换立即生效并在重启后保留；文件名、路径及文件内容不会翻译。跟随系统支持简中和繁中地区，其他未支持语言回退到英文。macOS 自身提供的授权及应用选择窗口仍由系统决定语言。

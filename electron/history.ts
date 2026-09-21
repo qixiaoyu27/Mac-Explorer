@@ -1,3 +1,4 @@
+import { t as tr } from '../shared/i18n';
 import fs from 'node:fs/promises';
 import type { FileChange, OperationResult } from '../shared/types';
 import { readableError } from './files';
@@ -25,10 +26,10 @@ export class FileHistory {
     for (const step of batch.steps) {
       try {
         const current = await fs.lstat(step.to);
-        if (current.ino !== step.inode || current.dev !== step.device) throw new Error('项目已被其他文件替换，无法撤销。');
+        if (current.ino !== step.inode || current.dev !== step.device) throw new Error(tr('项目已被其他文件替换，无法撤销。'));
         if (step.from) await move(step.to, step.from);
         else {
-          if (current.mtimeMs !== step.modified || current.size !== step.size) throw new Error('项目在操作后已被修改，为保留改动，无法自动撤销。');
+          if (current.mtimeMs !== step.modified || current.size !== step.size) throw new Error(tr('项目在操作后已被修改，为保留改动，无法自动撤销。'));
           await trash(step.to);
         }
         result.succeeded.push(step.to);

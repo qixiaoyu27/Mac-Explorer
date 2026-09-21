@@ -1,3 +1,4 @@
+import { t as tr } from '../shared/i18n';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -6,24 +7,24 @@ import type { FileEntry, Listing, OperationResult, SearchResult } from '../share
 
 const exec = promisify(execFile);
 export function absolute(value: unknown): string {
-  if (typeof value !== 'string' || !path.isAbsolute(value) || value.includes('\0')) throw new Error('需要有效的绝对路径。');
+  if (typeof value !== 'string' || !path.isAbsolute(value) || value.includes('\0')) throw new Error(tr('需要有效的绝对路径。'));
   return path.normalize(value);
 }
 export function validName(value: unknown): string {
   if (typeof value !== 'string' || !value.trim() || value === '.' || value === '..' || /[/\0:]/.test(value)) {
-    throw new Error('名称不能为空，也不能包含 /、: 或空字符。');
+    throw new Error(tr('名称不能为空，也不能包含 /、: 或空字符。'));
   }
-  if (Buffer.byteLength(value) > 255) throw new Error('名称过长，请使用更短的名称。');
+  if (Buffer.byteLength(value) > 255) throw new Error(tr('名称过长，请使用更短的名称。'));
   return value;
 }
 export function readableError(error: unknown): string {
   const e = error as NodeJS.ErrnoException;
-  if (e.code === 'EACCES' || e.code === 'EPERM') return '没有访问权限。请在系统设置 → 隐私与安全性中允许访问该文件夹。';
-  if (e.code === 'ENOENT') return '文件或文件夹已不存在，请刷新后重试。';
-  if (e.code === 'EEXIST' || e.code === 'ERR_FS_CP_EEXIST') return '已存在同名项目。请更改名称后重试，现有文件不会被覆盖。';
-  if (e.code === 'ENOSPC') return '磁盘空间不足，请释放空间后重试。';
-  if (e.code === 'EROFS') return '此位置是只读的，无法修改。';
-  return e.message || String(error);
+  if (e.code === 'EACCES' || e.code === 'EPERM') return tr('没有访问权限。请在系统设置 → 隐私与安全性中允许访问该文件夹。');
+  if (e.code === 'ENOENT') return tr('文件或文件夹已不存在，请刷新后重试。');
+  if (e.code === 'EEXIST' || e.code === 'ERR_FS_CP_EEXIST') return tr('已存在同名项目。请更改名称后重试，现有文件不会被覆盖。');
+  if (e.code === 'ENOSPC') return tr('磁盘空间不足，请释放空间后重试。');
+  if (e.code === 'EROFS') return tr('此位置是只读的，无法修改。');
+  return tr(e.message || String(error));
 }
 export async function entryFor(input: string): Promise<FileEntry> {
   const filePath = absolute(input);
@@ -54,14 +55,14 @@ export async function searchDirectory(input: string, query: string, hidden: bool
   let visited = 0; let skipped = 0;
   if (!needle) return { entries, truncated: false, skipped };
   while (queue.length && visited < 30_000 && entries.length < 1_000) {
-    if (signal?.aborted) throw new Error('搜索已取消。');
+    if (signal?.aborted) throw new Error(tr('搜索已取消。'));
     const current = queue.shift()!;
     const children = await fs.readdir(current, { withFileTypes: true }).catch(error => {
       if (current === absolute(input)) throw error;
       skipped++; return [];
     });
     for (const child of children) {
-      if (signal?.aborted) throw new Error('搜索已取消。');
+      if (signal?.aborted) throw new Error(tr('搜索已取消。'));
       if (!hidden && child.name.startsWith('.')) continue;
       visited++;
       const childPath = path.join(current, child.name);
@@ -81,7 +82,7 @@ async function ensureAbsent(destination: string) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw error;
   }
-  throw Object.assign(new Error('已存在同名项目。'), { code: 'EEXIST' });
+  throw Object.assign(new Error(tr('已存在同名项目。')), { code: 'EEXIST' });
 }
 export async function createEntry(parent: string, name: string, directory: boolean): Promise<string> {
   const destination = path.join(absolute(parent), validName(name));
@@ -97,11 +98,11 @@ export async function moveNoReplace(source: string, destination: string) {
     if (error.code === 'ENOENT') return false;
     throw error;
   });
-  if (remains) throw new Error('移动未完成，目标可能已存在同名项目。原文件已保留。');
+  if (remains) throw new Error(tr('移动未完成，目标可能已存在同名项目。原文件已保留。'));
 }
 export async function renameEntry(input: string, name: string): Promise<string> {
   const source = absolute(input);
-  if (source === '/') throw new Error('不能重命名根目录。');
+  if (source === '/') throw new Error(tr('不能重命名根目录。'));
   const destination = path.join(path.dirname(source), validName(name));
   if (source === destination) return source;
   // APFS is usually case-insensitive. A temporary hop allows case-only renames
@@ -121,16 +122,16 @@ export async function renameEntry(input: string, name: string): Promise<string> 
 }
 export async function transferEntries(inputs: string[], parent: string, cut: boolean): Promise<OperationResult> {
   const directory = await fs.realpath(absolute(parent));
-  if (!(await fs.stat(directory)).isDirectory()) throw new Error('目标必须是文件夹。');
+  if (!(await fs.stat(directory)).isDirectory()) throw new Error(tr('目标必须是文件夹。'));
   const result: OperationResult = { succeeded: [], errors: [], changes: [] };
   for (const input of [...new Set(inputs)]) {
     const source = absolute(input);
     try {
-      if (source === '/') throw new Error('不能复制或移动根目录。');
+      if (source === '/') throw new Error(tr('不能复制或移动根目录。'));
       const realSource = await fs.realpath(source);
       const stat = await fs.lstat(source);
       if (stat.isDirectory() && (directory === realSource || directory.startsWith(realSource + path.sep))) {
-        throw new Error('不能将文件夹放入它自身或它的子文件夹。');
+        throw new Error(tr('不能将文件夹放入它自身或它的子文件夹。'));
       }
       let destination = path.join(directory, path.basename(source));
       const sourceParent = await fs.realpath(path.dirname(source));
@@ -140,7 +141,7 @@ export async function transferEntries(inputs: string[], parent: string, cut: boo
         const stem = path.basename(source, ext);
         let number = 1;
         do {
-          destination = path.join(directory, `${stem} - 副本${number === 1 ? '' : ` (${number})`}${ext}`);
+          destination = path.join(directory, tr('{0} - 副本{1}{2}', stem, number === 1 ? '' : ` (${number})`, ext));
           number++;
         } while (await fs.lstat(destination).then(() => true, () => false));
       }
