@@ -191,6 +191,11 @@ final class MetadataCell: NSTableCellView {
   required init?(coder: NSCoder) { fatalError() }
   override func layout() { super.layout(); value.frame = NSRect(x: 12, y: (bounds.height - 17) / 2, width: max(0, bounds.width - 24), height: 17) }
 }
+final class ExplorerTableHeaderView: NSTableHeaderView {
+  var onMenu: ((NSEvent) -> Void)?
+  override func rightMouseDown(with event: NSEvent) { if let onMenu { onMenu(event) } else { super.rightMouseDown(with: event) } }
+}
+
 final class ExplorerHeaderCell: NSTableHeaderCell {
   var ascending: Bool?
   override func draw(withFrame fullFrame: NSRect, in controlView: NSView) {
@@ -212,7 +217,7 @@ final class ExplorerHeaderCell: NSTableHeaderCell {
   override func drawSortIndicator(withFrame cellFrame: NSRect, in controlView: NSView, ascending: Bool, priority: Int) {}
 }
 final class FileRowView: NSTableRowView {
-  var hovered = false { didSet { (view(atColumn: 0) as? NameCell)?.checkbox.hovered = hovered; needsDisplay = true } }
+  var hovered = false { didSet { for column in 0..<numberOfColumns { (view(atColumn: column) as? NameCell)?.checkbox.hovered = hovered }; needsDisplay = true } }
   override func updateTrackingAreas() {
     super.updateTrackingAreas(); trackingAreas.forEach(removeTrackingArea)
     addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
@@ -277,6 +282,15 @@ final class FileTableView: NSTableView {
   }
 }
 final class FileCollectionView: NSCollectionView {
+  override func setFrameSize(_ newSize: NSSize) {
+    var size = newSize
+    if let layout = collectionViewLayout as? ExplorerCollectionLayout, layout.mode == .list {
+      // NSCollectionView can propose the viewport width during relayout. Horizontal
+      // List content must keep its full document width for NSClipView to scroll it.
+      size.width = max(size.width, layout.collectionViewContentSize.width)
+    }
+    super.setFrameSize(size)
+  }
   var openSelection: (() -> Void)?; var previewSelection: (() -> Void)?; var showContext: ((NSEvent) -> Void)?; var renameSelection: (() -> Void)?; var trashSelection: (() -> Void)?
   private var marquee: NativeMarqueeSelection?
   private var selectionCursor: Int?

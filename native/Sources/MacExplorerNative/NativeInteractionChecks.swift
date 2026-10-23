@@ -111,11 +111,19 @@ enum NativeInteractionChecks {
     try await until { !browser.loading }
     browser.table.selectRowIndexes(IndexSet(integer: 45), byExtendingSelection: false); browser.table.scrollRowToVisible(65)
     window.contentView?.layoutSubtreeIfNeeded()
-    let selection = browser.selectedPaths, scroll = browser.tableScroll.contentView.bounds.origin
+    let selection = browser.selectedPaths
     try await Task.sleep(nanoseconds: 300_000_000)
+    window.contentView?.layoutSubtreeIfNeeded()
+    // Compare the refresh with the settled viewport immediately before the external
+    // mutation, rather than an earlier pending AppKit selection/scroll adjustment.
+    let scroll = browser.tableScroll.contentView.bounds.origin
+    try check(browser.selectedPaths == selection && !selection.isEmpty && scroll.y > 100, "External refresh fixture starts with a settled nonempty selection and scrolled viewport")
     try Data("external".utf8).write(to: docs.appendingPathComponent("zz-external.txt"))
     try await until { browser.entries.contains { $0.name == "zz-external.txt" } }
-    try check(browser.selectedPaths == selection && abs(browser.tableScroll.contentView.bounds.origin.y - scroll.y) < 1, "External create refreshes in place without losing selection or scroll")
+    guard browser.selectedPaths == selection && abs(browser.tableScroll.contentView.bounds.origin.y - scroll.y) < 1 else {
+      throw NativeSmoke.Failure(description: "External create refreshes in place without losing selection or scroll; before=\(scroll), after=\(browser.tableScroll.contentView.bounds.origin), selectedBefore=\(selection), selectedAfter=\(browser.selectedPaths)")
+    }
+    try check(true, "External create refreshes in place without losing selection or scroll")
     let renaming = browser.entries.firstIndex { $0.id == selection.first }!
     browser.table.scrollRowToVisible(renaming); browser.executeAction("rename")
     guard let field = (browser.table.view(atColumn: 0, row: renaming, makeIfNecessary: false) as? NameCell)?.nameLabel, let editor = field.currentEditor() as? NSTextView else { throw NativeSmoke.Failure(description: "No rename editor") }

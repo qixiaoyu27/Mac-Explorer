@@ -43,6 +43,40 @@ enum LatestCoreChecks {
     try expect(result.skipped == 4, "Finder rejects files, packages, relative and missing locations")
     let suite = "native-latest-core.\(UUID().uuidString)", defaults = UserDefaults(suiteName: suite)!
     defer { defaults.removePersistentDomain(forName: suite) }
+    let bookmark = try URL(string: "smb://user:secret@fixture.invalid/share")!.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+    let snapshot = try NSKeyedArchiver.archivedData(withRootObject: ["items": [["Name": "Fixture server", "Bookmark": bookmark], ["Name": "Broken", "Bookmark": Data([0])]]], requiringSecureCoding: true)
+    let decoded = try FinderServersReader.decodeSnapshot(snapshot)
+    try expect(decoded.servers == [FinderServer(address: "smb://fixture.invalid/share", name: "Fixture server")] && decoded.skipped == 1, "Modern Finder archive resolves offline bookmarks and rejects corrupt entries without mounting")
+    for corrupt in [Data("bad archive".utf8), try NSKeyedArchiver.archivedData(withRootObject: ["wrong": []], requiringSecureCoding: true), Data(repeating: 0, count: 4 * 1024 * 1024 + 1)] {
+      do { _ = try FinderServersReader.decodeSnapshot(corrupt); throw CocoaError(.validationMissingMandatoryProperty) }
+      catch { try expect((error as NSError).domain != NSCocoaErrorDomain || (error as NSError).code != CocoaError.Code.validationMissingMandatoryProperty.rawValue, "Invalid server archives fail safely") }
+    }
+    let servers = FinderServersReader.filter([
+      FinderServer(address: "SMB://user:secret@NAS.invalid:445/share", name: "Shared"),
+      FinderServer(address: "smb://nas.invalid/share", name: "Duplicate"),
+      FinderServer(address: "smb://nas.invalid/Other", name: "Other"),
+      FinderServer(address: "smb://nas.invalid/share?secret=value", name: "Invalid"),
+      FinderServer(address: "afp://nas.invalid/share", name: "Unsupported"),
+      FinderServer(address: "file:///Volumes/Test", name: "Mounted path"),
+      FinderServer(address: "smb://nas.invalid/share\n", name: "Control"),
+      FinderServer(address: "smb://[::1]:1445/中文 空格", name: "Unicode"),
+      FinderServer(address: "smb://offline.invalid/", name: "smb://user:secret@offline.invalid/")
+    ])
+    try expect(servers.servers.count == 4 && servers.skipped == 4, "Server import rejects unsupported, invalid and file addresses without mounting")
+    try expect(servers.servers[0] == FinderServer(address: "smb://nas.invalid/share", name: "Shared"), "Server import strips credentials and normalizes authority without losing first name")
+    try expect(servers.servers.last?.name == "offline.invalid", "URL display names cannot retain credentials")
+    try expect(servers.servers.contains { $0.address.contains("[::1]:1445/") }, "IPv6, nondefault ports and Unicode paths survive import")
+    try expect(try NativeServerFavorites.merge(servers.servers, into: defaults) == 4, "Server import persists all valid offline favorites")
+    try expect(try NativeServerFavorites.merge(servers.servers.reversed(), into: defaults) == 0 && NativeServerFavorites.load(defaults) == servers.servers, "Repeated import preserves existing server names and order")
+    let savedServers = defaults.data(forKey: NativeServerFavorites.preferenceKey)!
+    try expect(!String(decoding: savedServers, as: UTF8.self).contains("secret"), "No imported URL credentials reach persisted preferences")
+    try NativeServerFavorites.remove(servers.servers[0].address, from: defaults)
+    try expect(NativeServerFavorites.load(defaults) == Array(servers.servers.dropFirst()), "Removing a favorite preserves all remaining servers")
+    let largeFavorites = (0..<500).map { FinderServer(address: "smb://fixture.invalid/" + String($0) + String(repeating: "a", count: 1500), name: String(repeating: "收藏", count: 200)) }
+    defaults.removeObject(forKey: NativeServerFavorites.preferenceKey)
+    try expect(try NativeServerFavorites.merge(largeFavorites, into: defaults) == 500 && defaults.data(forKey: NativeServerFavorites.preferenceKey)!.count > 1024 * 1024 && NativeServerFavorites.load(defaults) == largeFavorites, "The bounded 500-server list reloads even when long Unicode names exceed one MiB")
+    defaults.set(Data("bad".utf8), forKey: NativeServerFavorites.preferenceKey)
+    try expect(NativeServerFavorites.load(defaults).isEmpty, "Corrupt server favorites are ignored")
     var places = QuickAccessState(defaults: defaults)
     places.toggle("/Existing", defaultPaths: ["/Downloads"])
     places.toggle("/Downloads", defaultPaths: ["/Downloads"])

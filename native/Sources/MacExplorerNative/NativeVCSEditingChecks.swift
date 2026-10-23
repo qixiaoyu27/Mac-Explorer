@@ -50,7 +50,9 @@ enum NativeVCSEditingChecks {
       browser.executeAction("rename")
       guard let field = (browser.table.view(atColumn: 0, row: index, makeIfNecessary: true) as? NameCell)?.nameLabel,
             let editor = field.currentEditor() as? NSTextView else { throw NativeSmoke.Failure(description: "VCS editing fixture starts an actual inline editor (\(scenario))") }
-      window.makeKeyAndOrderFront(nil); window.makeFirstResponder(editor)
+      // Earlier suite checks launch child applications; explicitly regain activation
+      // before asserting this real window's editor focus.
+      window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); window.makeFirstResponder(editor)
       try await until { window.isKeyWindow && window.firstResponder === editor && field.currentEditor() === editor }
       let draft = "unsaved-\(scenario).txt"; editor.string = draft
       browser.setVersionControl(scenario != "disable")

@@ -6,6 +6,7 @@ public struct NativeSavedWindow: Codable, Sendable {
   public init(locations: [String], frame: String) { self.locations = locations; self.frame = frame }
 }
 public enum NativeSessions {
+  public static let restoreAfterQuitKey = "restoreWindowsAfterQuit"
   public static func validLocation(_ value: String) -> URL? {
     guard value.utf8.count <= 32768, !value.contains("\0"), let url = URL(string: value) else { return nil }
     if url.isFileURL, url.path.hasPrefix("/"), url.query == nil, url.fragment == nil, url.user == nil, url.password == nil, url.host == nil || url.host == "" || url.host == "localhost" { return url }

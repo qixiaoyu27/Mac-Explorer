@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 
 root = pathlib.Path(__file__).resolve().parents[1]
-names = ["CoreChecks", "FileActionChecks", "MetadataTransferChecks", "ServerSideTransferChecks", "TransferTelemetryChecks", "PropertiesChecks", "WatcherChecks", "QuickAccessChecks", "LatestCoreChecks", "NetworkChecks", "TrashChecks", "SystemChecks"]
+names = ["CoreChecks", "ColumnChecks", "NetworkDeletionChecks", "FileActionChecks", "MetadataTransferChecks", "ServerSideTransferChecks", "TransferTelemetryChecks", "PropertiesChecks", "WatcherChecks", "QuickAccessChecks", "LatestCoreChecks", "NetworkChecks", "TrashChecks", "SystemChecks"]
 parser = argparse.ArgumentParser()
 parser.add_argument('checks', nargs='*', choices=names)
 selected = parser.parse_args().checks or names

@@ -15,6 +15,7 @@ enum ExplorerShortcuts {
     .init(id: "cut", title: NL("剪切"), defaults: ["Command+X", "Control+X"]),
     .init(id: "paste", title: NL("粘贴"), defaults: ["Command+V", "Control+V"]),
     .init(id: "undo", title: NL("撤销"), defaults: ["Command+Z", "Control+Z"]),
+    .init(id: "redo", title: NL("重做"), defaults: ["Command+Shift+Z", "Control+Y"]),
     .init(id: "move-here", title: NL("移动已复制的文件"), defaults: ["Command+Alt+V"]),
     .init(id: "duplicate", title: NL("创建副本"), defaults: ["Command+D"]),
     .init(id: "select-all", title: NL("全选"), defaults: ["Command+A", "Control+A"]),

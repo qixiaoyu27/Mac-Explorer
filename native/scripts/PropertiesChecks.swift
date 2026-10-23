@@ -51,6 +51,20 @@ struct PropertiesChecks {
     try check(cancelled, "Properties traversal cooperates with cancellation")
     try check(try Data(contentsOf: folder.appendingPathComponent("file.txt")) == Data("abc".utf8), "Source payload preserved")
     try check(try Data(contentsOf: outside.appendingPathComponent("not-counted.bin")).count == 8192, "External target preserved")
+    try check(one.metadata?.owner == getuid() && one.metadata?.permissions == "644", "Extended properties report filesystem owner and permission bits")
+    try check(onlyLink.metadata?.linkTarget == "../outside", "Extended properties read link text without following its target")
+    let editable = folder.appendingPathComponent("editable.txt")
+    try Data("edit payload".utf8).write(to: editable)
+    let expected = try FilePropertiesReader.read([editable]).metadata!.identity
+    try check(expected == FileActions.identity(editable), "Property editing identity agrees with file action history")
+    let renamed = try FileActions.rename(editable, to: "renamed.txt", expectedIdentity: expected)
+    let occupied = folder.appendingPathComponent("occupied.txt"); try Data("occupant".utf8).write(to: occupied)
+    do { _ = try FileActions.rename(renamed.destination, to: "occupied.txt", expectedIdentity: expected); fatalError("Property rename overwrote collision") } catch { count += 1 }
+    try check(try String(contentsOf: occupied) == "occupant", "Property rename preserves a collision occupant")
+    try fm.moveItem(at: renamed.destination, to: folder.appendingPathComponent("retained-name"))
+    try Data("replacement".utf8).write(to: renamed.destination)
+    do { _ = try FileActions.rename(renamed.destination, to: "changed.txt", expectedIdentity: expected); fatalError("Property rename accepted replacement") } catch { count += 1 }
+    try check(try String(contentsOf: renamed.destination) == "replacement", "A stale property window cannot rename a replacement file")
     let propertyFile = folder.appendingPathComponent("file.txt")
     let birth = Date(timeIntervalSince1970: 1_600_000_000), modified = Date(timeIntervalSince1970: 1_600_000_100)
     try fm.setAttributes([.creationDate: birth, .modificationDate: modified], ofItemAtPath: propertyFile.path)

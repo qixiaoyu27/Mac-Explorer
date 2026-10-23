@@ -24,7 +24,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
   private var pendingExternalURLs: [URL] = []
   private var sessionDefaults: UserDefaults?
   private var lastHomeDirectory: URL?
-  private var preserveWindowsOnExit = true
+  private var preserveWindowsOnExit: Bool?
   private var updateInstaller: (() throws -> Void)?
   private var updateTerminationError: Error?
 
@@ -38,8 +38,10 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     let smoke = argument("--smoke-test")
     let comparison = argument("--compare")
     let explicitLocation = smoke ?? comparison ?? argument("--path")
+    let quitFixture = smoke.flatMap { NativeQuitChecks.fixture(root: $0, suite: argument("--quit-session-suite")) }
     let defaults: UserDefaults
-    if smoke != nil || comparison != nil {
+    if let quitFixture { defaults = quitFixture }
+    else if smoke != nil || comparison != nil {
       guard let isolated = UserDefaults(suiteName: "local.macexplorer.native-smoke.\(ProcessInfo.processInfo.processIdentifier)") else {
         fputs("Cannot initialize isolated smoke-test preferences\n", stderr)
         exit(1)
@@ -61,7 +63,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     })
     versionControl.setEnabled(defaults.object(forKey: "versionControl") as? Bool ?? true)
     let home = ProcessInfo.processInfo.environment["EXPLORER_NATIVE_HOME"].map { URL(fileURLWithPath: $0) } ?? FileManager.default.homeDirectoryForCurrentUser
-    browser = BrowserController(initial: NativeStartLocation.initialURL(explicit: explicitLocation, defaults: defaults, home: home), defaults: defaults)
+    browser = BrowserController(initial: NativeStartLocation.initialURL(explicit: quitFixture == nil ? explicitLocation : nil, defaults: defaults, home: home), defaults: defaults)
     if smoke != nil || comparison != nil { browser.filePasteboard = NSPasteboard(name: .init("local.macexplorer.native-test.\(ProcessInfo.processInfo.processIdentifier)")) }
     if let comparison {
       browser.home = URL(fileURLWithPath: comparison).deletingLastPathComponent()
@@ -89,7 +91,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     makeMenus()
     window.makeKeyAndOrderFront(nil)
     NSApp.activate(ignoringOtherApps: true)
-    if smoke == nil && comparison == nil && argument("--path") == nil && pendingExternalURLs.isEmpty { restoreWindows(defaults: defaults) }
+    if (quitFixture != nil || smoke == nil && comparison == nil) && argument("--path") == nil && pendingExternalURLs.isEmpty { restoreWindows(defaults: defaults) }
     if !pendingExternalURLs.isEmpty { let urls = pendingExternalURLs; pendingExternalURLs = []; openExternal(urls) }
     if let comparison, let report = argument("--report") {
       Task { @MainActor in
@@ -208,7 +210,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     if let focusMonitor { NSEvent.removeMonitor(focusMonitor) }
   }
 
-  @objc private func quitWithoutWindows() { preserveWindowsOnExit = false; NSApp.terminate(nil) }
+  @objc private func quitNormally() { preserveWindowsOnExit = nil; NSApp.terminate(nil) }
   @objc private func quitKeepingWindows() { preserveWindowsOnExit = true; NSApp.terminate(nil) }
   func installUpdateAndTerminate(_ install: @escaping () throws -> Void) throws {
     guard updateInstaller == nil else { throw NativeUpdateValidation.failure("正在准备更新安装。") }
@@ -221,7 +223,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     do {
       guard !browserWindows.contains(where: { ($0.contentViewController as? BrowserController)?.busy == true }) else { throw NativeUpdateValidation.failure("文件操作正在进行中") }
       if let defaults = sessionDefaults {
-        let states = installingUpdate || preserveWindowsOnExit ? browserWindows.compactMap { owner -> NativeSavedWindow? in
+        let states = installingUpdate || (preserveWindowsOnExit ?? (defaults.object(forKey: NativeSessions.restoreAfterQuitKey) as? Bool ?? false)) ? browserWindows.compactMap { owner -> NativeSavedWindow? in
           guard let controller = owner.contentViewController as? BrowserController else { return nil }
           return NativeSavedWindow(locations: controller.tabs.map { $0.directory.absoluteString }, frame: NSStringFromRect(owner.frame))
         } : []
@@ -232,7 +234,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
       try updateInstaller?(); updateInstaller = nil
       return .terminateNow
     } catch {
-      updateInstaller = nil; preserveWindowsOnExit = true
+      updateInstaller = nil; preserveWindowsOnExit = nil
       if installingUpdate { updateTerminationError = error }
       else { let alert = NSAlert(); alert.messageText = NL(error.localizedDescription); alert.addButton(withTitle: NL("取消")); alert.runModal() }
       return .terminateCancel
@@ -287,7 +289,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     app.addItem(withTitle: NL("设置…"), action: #selector(showSettings), keyEquivalent: ",").target = self
     app.addItem(.separator())
     app.addItem(withTitle: NL("隐藏 Mac Explorer"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-    app.addItem(withTitle: NL("退出 Mac Explorer"), action: #selector(quitWithoutWindows), keyEquivalent: "q").target = self
+    app.addItem(withTitle: NL("退出 Mac Explorer"), action: #selector(quitNormally), keyEquivalent: "q").target = self
     app.addItem(withTitle: NL("退出并保留窗口"), action: #selector(quitKeepingWindows), keyEquivalent: "").target = self
     addMenu("Mac Explorer", submenu: app, to: main)
     let file = NSMenu(title: NL("文件"))
@@ -305,6 +307,10 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     edit.addItem(withTitle: NL("复制"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
     edit.addItem(withTitle: NL("粘贴"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
     edit.addItem(withTitle: NL("全选"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+    edit.addItem(.separator())
+    edit.addItem(withTitle: NL("撤销"), action: #selector(BrowserController.undo(_:)), keyEquivalent: "z")
+    edit.addItem(withTitle: NL("重做"), action: #selector(BrowserController.redo(_:)), keyEquivalent: "z")
+    edit.items.last?.keyEquivalentModifierMask = [.command, .shift]
     edit.addItem(.separator())
     item(NL("复制路径"), #selector(BrowserController.copyPaths), "", in: edit)
     addMenu(NL("编辑"), submenu: edit, to: main)
@@ -354,6 +360,9 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     if browser == nil { newWindow() }
     summon(); browser?.executeAction("settings")
   }
-  func validateMenuItem(_ menuItem: NSMenuItem) -> Bool { window == nil || !ExplorerDialogs.isPresenting(in: window) }
+  func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    if menuItem.action == #selector(quitNormally) || menuItem.action == #selector(quitKeepingWindows) { return true }
+    return window == nil || !ExplorerDialogs.isPresenting(in: window)
+  }
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }

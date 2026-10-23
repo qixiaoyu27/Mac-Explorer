@@ -34,7 +34,7 @@ enum NativeParityChecks {
     defer { source.selectedPaths = selection }
     source.selectedPaths = []
     let empty = source.contextItems()
-    try expect(empty.map(\.title) == ["新建", "粘贴", "将项目移到这里", "撤销", "刷新", "显示隐藏的项目", "打开文件夹…", "在终端中打开"], "Empty-area context menu matches Electron action order")
+    try expect(empty.map(\.title) == ["新建", "粘贴", "将项目移到这里", "撤销", "重做", "刷新", "显示隐藏的项目", "打开文件夹…", "在终端中打开"], "Empty-area context menu matches Electron action order")
     source.selectedPaths = [folder.id]
     var menu = source.contextItems()
     try expect(menu.contains { $0.title == "在终端中打开" } && menu.contains { $0.title.contains("快速访问") }, "Folder context includes terminal and Quick Access pinning")

@@ -70,9 +70,10 @@ public enum FileActions {
     return FileActionChange(source: nil, destination: destination, kind: .create)
   }
 
-  public static func rename(_ source: URL, to name: String) throws -> FileActionChange {
+  public static func rename(_ source: URL, to name: String, expectedIdentity: String? = nil) throws -> FileActionChange {
     try validateName(name)
     let source = try existingURL(source)
+    if let expectedIdentity, try identity(source) != expectedIdentity { throw failure(NL("项目已被其他文件替换，无法修改属性。")) }
     try validateModificationSource(source)
     let destination = source.deletingLastPathComponent().appendingPathComponent(name)
     if source.path == destination.path {

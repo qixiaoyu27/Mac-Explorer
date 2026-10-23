@@ -1,6 +1,12 @@
 import AppKit
 import ExplorerCore
 
+struct EDPropertyValues {
+  var general: [(String, String)]
+  var details: [(String, String)] = []
+  var permissions: [(String, String)] = []
+}
+
 /// Window-scoped Explorer dialogs. Call on the main thread.
 /// Shortcut row names are opaque identifiers: onShortcut returns the supplied first
 /// tuple element unchanged, with an Electron-style accelerator (or "" to clear).
@@ -27,7 +33,7 @@ enum ExplorerDialogs {
     form.field.selectText(nil)
   }
 
-  static func confirm(in window: NSWindow, title: String, detail: String, confirmTitle: String, remember: ((Bool) -> Void)? = nil, action: @escaping () -> Void) {
+  static func confirm(in window: NSWindow, title: String, detail: String, confirmTitle: String, remember: ((Bool) -> Void)? = nil, destructive: Bool = false, action: @escaping () -> Void) {
     let body = EDScrollingBody()
     body.flow.padding = 0
     let detailLabel = edLabel(detail, size: 13, wraps: true, selectable: true)
@@ -43,21 +49,29 @@ enum ExplorerDialogs {
       dialog.close()
       action()
     }
-    dialog.present(focus: dialog.surface.primary)
+    dialog.present(focus: destructive ? dialog.surface.cancel : dialog.surface.primary)
   }
 
-  static func properties(in window: NSWindow, title: String, icon: NSImage?, values: [(String, String)], load: (() async throws -> [(String, String)])? = nil) {
-    let body = EDPropertiesBody(title: title, icon: icon, values: values)
-    let dialog = EDPresentation(parent: window, title: NL("{0} 属性", title), size: NSSize(width: 470, height: 600), body: body, compact: true, draggable: true)
-    dialog.onSubmit = { [weak dialog] in dialog?.close() }
+  static func properties(in window: NSWindow, title: String, icon: NSImage?, values: [(String, String)], rename: ((String) -> Void)? = nil, load: (() async throws -> EDPropertyValues)? = nil) {
+    let body = EDPropertiesBody(title: title, icon: icon, values: values, editable: rename != nil)
+    let dialog = EDPresentation(parent: window, title: NL("{0} 属性", title), size: NSSize(width: 490, height: 600), body: body, compact: true, draggable: true)
+    if rename != nil { dialog.surface.primary.title = NL("保存"); dialog.surface.primary.isEnabled = false }
+    dialog.onSubmit = { [weak dialog, weak body] in
+      guard let dialog, let body else { return }
+      let value = body.name.stringValue
+      dialog.close()
+      if value != title { rename?(value) }
+    }
     dialog.present(focus: nil)
     if let load {
       let task = Task { @MainActor [weak body, weak dialog] in
         do {
           let values = try await load()
           try Task.checkCancellation()
-          guard dialog != nil else { return }; body?.update(values: values)
-        } catch is CancellationError {} catch { body?.update(values: values + [(NL("错误"), error.localizedDescription)]) }
+          guard let dialog else { return }; body?.update(values: values); dialog.surface.primary.isEnabled = true
+        } catch is CancellationError {} catch {
+          body?.update(values: EDPropertyValues(general: values + [(NL("错误"), error.localizedDescription)]))
+        }
       }
       dialog.onClose = { task.cancel() }
     }
@@ -257,6 +271,7 @@ fileprivate final class EDPresentation {
       }
       if modifiers.contains(.command) {
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        if key == "q" && modifiers == .command { return event }
         if key == "w" && modifiers == .command { self.close(); return nil }
         // Keep text editing native, but never dispatch an Explorer/menu command
         // behind the modal (including shortcuts such as Command+Delete).
@@ -669,11 +684,12 @@ private final class EDMetadataRow: EDView {
 }
 
 private final class EDPropertyIdentity: EDView {
-  private let image = NSImageView(), name = ExplorerTextField()
-  init(title: String, icon: NSImage?) {
+  private let image = NSImageView()
+  let name = ExplorerTextField()
+  init(title: String, icon: NSImage?, editable: Bool = false) {
     super.init(frame: .zero)
     image.image = icon; image.imageScaling = .scaleProportionallyUpOrDown
-    name.stringValue = title; name.isEditable = false; name.isSelectable = true; name.isBordered = false; name.drawsBackground = false; name.font = .systemFont(ofSize: 13); name.textColor = ExplorerPalette.text
+    name.stringValue = title; name.isEditable = editable; name.isSelectable = true; name.identifier = .init("property-name"); name.setAccessibilityLabel(NL("名称")); name.isBordered = false; name.drawsBackground = false; name.font = .systemFont(ofSize: 13); name.textColor = ExplorerPalette.text
     addSubview(image); addSubview(name)
   }
   required init?(coder: NSCoder) { fatalError() }
@@ -690,36 +706,58 @@ private final class EDPropertyAttribute: EDView {
   override func layout() { super.layout(); label.frame = NSRect(x: 0, y: 4, width: 72, height: 20); toggle.frame = NSRect(x: 86, y: 0, width: max(0, bounds.width - 86), height: 26) }
 }
 private final class EDPropertiesBody: EDView {
-  private let tab = EDButton(title: NL("常规"), style: .tab)
+  private let tabs = [NL("常规"), NL("详细信息"), NL("权限")].map { EDButton(title: $0, style: .tab) }
   private let content = EDScrollingBody()
   private let identity: EDPropertyIdentity
-  init(title: String, icon: NSImage?, values: [(String, String)]) {
-    identity = EDPropertyIdentity(title: title, icon: icon)
-    super.init(frame: .zero); tab.checked = true; content.bordered = true
-    addSubview(content); addSubview(tab); update(values: values)
+  private var values: EDPropertyValues
+  private var section = 0
+  var name: ExplorerTextField { identity.name }
+  init(title: String, icon: NSImage?, values: [(String, String)], editable: Bool) {
+    identity = EDPropertyIdentity(title: title, icon: icon, editable: editable)
+    self.values = EDPropertyValues(general: values)
+    super.init(frame: .zero); content.bordered = true; addSubview(content)
+    tabs[2].toolTip = NL("权限由文件系统或服务器提供；共享访问控制由服务器决定。")
+    for (index, tab) in tabs.enumerated() {
+      addSubview(tab); tab.onPress = { [weak self] in self?.select(index) }
+      tab.onNavigate = { [weak self] key in
+        guard let self else { return }
+        let next = key == 115 ? 0 : key == 119 ? 2 : (index + (key == 124 ? 1 : 2)) % 3
+        self.select(next); self.window?.makeFirstResponder(self.tabs[next])
+      }
+    }
+    select(0)
   }
-  func update(values: [(String, String)]) {
+  private func select(_ index: Int) {
+    window?.makeFirstResponder(tabs[index]); section = index
+    for (i, tab) in tabs.enumerated() { tab.checked = i == index }
+    render()
+  }
+  func update(values: EDPropertyValues) { self.values = values; render() }
+  private func render() {
     content.flow.clear(); content.flow.padding = 19; content.flow.gap = 13
-    content.flow.add(identity) { _ in 61 }
+    if section == 0 { content.flow.add(identity) { _ in 61 } }
+    let rows = section == 0 ? values.general : section == 1 ? values.details : values.permissions
     var attributes = false
-    for pair in values {
+    for pair in rows {
       if pair.0 == NL("只读") || pair.0 == NL("隐藏") {
         let row = EDPropertyAttribute(title: pair.0, value: pair.1, first: !attributes); attributes = true
         content.flow.add(row) { _ in 26 }
       } else {
-        let row = EDMetadataRow(pair, keyWidth: 72)
+        let row = EDMetadataRow(pair, keyWidth: 85)
         content.flow.add(row) { [weak row] width in row?.height(for: width) ?? 24 }
       }
-      if pair.0 == NL("占用空间") || pair.0 == NL("修改日期") {
+      if section == 0 && (pair.0 == NL("占用空间") || pair.0 == NL("修改日期")) {
         let separator = SurfaceView(); separator.color = ExplorerPalette.border
         content.flow.add(separator) { _ in 1 }
       }
     }
+    content.scroll.contentView.scroll(to: .zero)
     content.needsLayout = true; needsLayout = true
   }
   required init?(coder: NSCoder) { fatalError() }
   override func layout() {
-    super.layout(); tab.frame = NSRect(x: 0, y: 0, width: 64, height: 34)
+    super.layout(); var x: CGFloat = 0
+    for tab in tabs { let width = max(68, tab.intrinsicContentSize.width); tab.frame = NSRect(x: x, y: 0, width: width, height: 34); x += width }
     content.frame = NSRect(x: 0, y: 33, width: bounds.width, height: max(1, bounds.height - 51)); content.needsLayout = true
   }
 }
@@ -875,8 +913,18 @@ private final class EDSettingsBody: EDView {
         guard let location = NativeStartLocation(rawValue: value) else { return }
         browser?.defaults.set(location.rawValue, forKey: NativeStartLocation.preferenceKey)
       }
-      startup.content.addSubview(destination); startup.arrange = { destination.frame = $0 }
-      content.flow.add(startup) { _ in 58 }
+      let restore = EDButton(title: NL("退出后恢复窗口和标签页"), style: .checkbox)
+      restore.checked = browser.defaults.object(forKey: NativeSessions.restoreAfterQuitKey) as? Bool ?? false
+      restore.onPress = { [weak restore, weak browser] in
+        guard let restore else { return }; restore.checked.toggle()
+        browser?.defaults.set(restore.checked, forKey: NativeSessions.restoreAfterQuitKey)
+      }
+      startup.content.addSubview(destination); startup.content.addSubview(restore)
+      startup.arrange = { rect in
+        destination.frame = NSRect(x: 0, y: 0, width: rect.width, height: 32)
+        restore.frame = NSRect(x: 0, y: 40, width: rect.width, height: 28)
+      }
+      content.flow.add(startup) { _ in 94 }
     }
     let language = EDGroup(NL("语言"))
     let row = EDChoiceRow(title: NL("界面语言"), options: [(NL("跟随系统"), "system"), ("简体中文", "zh-CN"), ("繁體中文", "zh-TW"), ("English", "en")], value: browser?.defaults.string(forKey: "language") ?? "system") { [weak self] in self?.browser?.changeLanguage($0) }

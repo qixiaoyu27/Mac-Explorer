@@ -11,6 +11,17 @@ public struct FileProperties: Sendable {
   public let readOnly: Bool?
   public let created: Date?
   public let modified: Date?
+  public let metadata: FilePropertyMetadata?
+}
+
+public struct FilePropertyMetadata: Sendable {
+  public let identity: String
+  public let owner: UInt32
+  public let group: UInt32
+  public let permissions: String
+  public let hardLinks: UInt16
+  public let accessed: Date
+  public let linkTarget: String?
 }
 
 public enum FilePropertiesReader {
@@ -66,6 +77,11 @@ public enum FilePropertiesReader {
       } else { created = date(birth) }
     } else { created = nil }
     let modified = latest.map { date($0.st_mtimespec) }
-    return FileProperties(size: size, allocated: allocated, files: files, folders: folders, skipped: skipped, symlinks: symlinks, readOnly: readOnly, created: created, modified: modified)
+    let metadata = latest.map { value in
+      FilePropertyMetadata(identity: "\(value.st_dev):\(value.st_ino):\(value.st_birthtimespec.tv_sec):\(value.st_birthtimespec.tv_nsec)",
+        owner: value.st_uid, group: value.st_gid, permissions: String(value.st_mode & 0o7777, radix: 8), hardLinks: value.st_nlink,
+        accessed: date(value.st_atimespec), linkTarget: value.st_mode & S_IFMT == S_IFLNK ? try? FileManager.default.destinationOfSymbolicLink(atPath: paths[0]) : nil)
+    }
+    return FileProperties(size: size, allocated: allocated, files: files, folders: folders, skipped: skipped, symlinks: symlinks, readOnly: readOnly, created: created, modified: modified, metadata: metadata)
   }
 }
