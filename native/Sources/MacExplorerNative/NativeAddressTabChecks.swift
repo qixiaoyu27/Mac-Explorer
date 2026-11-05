@@ -100,6 +100,15 @@ enum NativeAddressTabChecks {
     try check(tab.draggingEntered(AddressTabDrag(view: tab, board: board)).isEmpty, "Plain text cannot trigger a file tab drop")
 
     window.makeKeyAndOrderFront(nil); browser.navigate(to: docs); try await until { !browser.loading && browser.directory == docs }
+    let breadcrumbSource = downloads.appendingPathComponent("breadcrumb-source.txt")
+    try Data("breadcrumb transfer".utf8).write(to: breadcrumbSource)
+    guard let breadcrumb = descendants(browser.addressBar).compactMap({ $0 as? ExplorerButton }).first(where: { $0.title == NL("文档") }) else { throw failure("No Documents breadcrumb") }
+    board.clearContents(); board.writeObjects([breadcrumbSource as NSURL])
+    let breadcrumbDrag = AddressTabDrag(view: breadcrumb, board: board)
+    try check(!breadcrumb.draggingEntered(breadcrumbDrag).isEmpty, "Address breadcrumbs validate file drops using the real Browser transfer rules")
+    try check(breadcrumb.performDragOperation(breadcrumbDrag), "Address breadcrumbs accept file drops")
+    try await until { fm.fileExists(atPath: docs.appendingPathComponent("breadcrumb-source.txt").path) && !fm.fileExists(atPath: breadcrumbSource.path) }
+    try check(try String(contentsOf: docs.appendingPathComponent("breadcrumb-source.txt"), encoding: .utf8) == "breadcrumb transfer", "Address breadcrumb drops move files into their target folder")
     browser.openTab(at: downloads); try await until { !browser.loading && browser.directory == downloads }
     guard let first = browser.tabsDocument.subviews.compactMap({ $0 as? ExplorerTabView }).first else { throw failure("No Browser folder tab") }
     board.clearContents(); board.writeObjects([file as NSURL])

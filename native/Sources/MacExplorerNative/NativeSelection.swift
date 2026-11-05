@@ -119,7 +119,7 @@ private final class MarqueeOverlay: NSView {
 }
 
 final class NativeExpandedNameView: SurfaceView {
-  private let text = label("")
+  let text = label("")
   init(name: NSTextField, selected: Bool) {
     super.init(frame: .zero); color = selected ? ExplorerPalette.selection : ExplorerPalette.surface
     text.stringValue = name.stringValue; text.font = name.font; text.textColor = name.textColor; text.alignment = name.alignment
@@ -127,7 +127,7 @@ final class NativeExpandedNameView: SurfaceView {
   }
   required init?(coder: NSCoder) { fatalError() }
   override func hitTest(_ point: NSPoint) -> NSView? { nil }
-  override func layout() { super.layout(); text.frame = bounds.insetBy(dx: 2, dy: 1) }
+  override func layout() { super.layout(); text.frame = bounds.insetBy(dx: 7, dy: 1) }
 }
 
 @MainActor

@@ -1,12 +1,13 @@
 import AppKit
 import ExplorerCore
+import ObjectiveC
 
 @MainActor private final class TransferUIDrag: NSObject, NSDraggingInfo {
   let draggingDestinationWindow: NSWindow?
   let draggingPasteboard: NSPasteboard
   let draggingLocation: NSPoint
   var draggingSequenceNumber: Int { draggingPasteboard.changeCount }
-  var draggingSourceOperationMask: NSDragOperation { .copy }
+  var draggingSourceOperationMask: NSDragOperation = .copy
   var draggingSource: Any? { nil }
   var draggedImageLocation: NSPoint { draggingLocation }
   nonisolated var draggedImage: NSImage? { nil }
@@ -28,6 +29,11 @@ import ExplorerCore
   }
   @MainActor static func run() async throws {
     NSApplication.shared.setActivationPolicy(.prohibited)
+    let suppress: @convention(block) (AnyObject, AnyObject?) -> Void = { _, _ in }
+    let replacement = imp_implementationWithBlock(suppress)
+    let methods = [#selector(NSWindow.orderFront(_:)), #selector(NSWindow.makeKeyAndOrderFront(_:))].map { class_getInstanceMethod(NSWindow.self, $0)! }
+    let originals = methods.map { method_setImplementation($0, replacement) }
+    defer { for (method, original) in zip(methods, originals) { method_setImplementation(method, original) }; imp_removeBlock(replacement) }
     NativeLanguage.load(from: URL(fileURLWithPath: CommandLine.arguments[1])); NativeLanguage.mode = "zh-CN"
     let fm = FileManager.default, root = fm.temporaryDirectory.appendingPathComponent("native-transfer-ui-" + UUID().uuidString)
     let source = root.appendingPathComponent("source"), target = root.appendingPathComponent("target"), empty = root.appendingPathComponent("empty")
@@ -81,6 +87,61 @@ import ExplorerCore
       }
     }
     browser.navigate(to: target); try await until { !browser.loading && browser.entries.count == 2 }
+    let folder = target.appendingPathComponent("folder"), payload = folder.appendingPathComponent("keep.txt")
+    try Data("preserved".utf8).write(to: payload)
+    for mode: ExplorerLayoutMode in [.details, .icons, .list, .tiles, .content] {
+      browser.setView(mode, size: 64); browser.view.layoutSubtreeIfNeeded()
+      let row = browser.entries.firstIndex { $0.url.path == folder.path }!
+      let host: NSView = mode == .details ? browser.table : browser.collection
+      let drag = TransferUIDrag(view: host, board: board, point: .zero)
+      for mask: NSDragOperation in [.move, .copy] {
+        drag.draggingSourceOperationMask = mask
+        board.clearContents(); board.writeObjects([folder as NSURL, existing as NSURL])
+        let offered: NSDragOperation, accepted: Bool
+        if mode == .details {
+          offered = browser.tableView(browser.table, validateDrop: drag, proposedRow: row, proposedDropOperation: .on)
+          accepted = browser.tableView(browser.table, acceptDrop: drag, row: row, dropOperation: .on)
+        } else {
+          var proposed = IndexPath(item: row, section: 0) as NSIndexPath, operation = NSCollectionView.DropOperation.on
+          offered = browser.collectionView(browser.collection, validateDrop: drag, proposedIndexPath: &proposed, dropOperation: &operation)
+          accepted = browser.collectionView(browser.collection, acceptDrop: drag, indexPath: proposed as IndexPath, dropOperation: operation)
+        }
+        try check(offered.isEmpty && !accepted && !browser.busy && browser.lastError == nil, "\(mode): releasing a selection onto its own folder silently rejects \(mask == .move ? "move" : "copy")")
+      }
+      board.clearContents(); board.writeObjects([folder as NSURL, existing as NSURL]); drag.draggingSourceOperationMask = .move
+      let backgroundAccepted = mode == .details
+        ? browser.tableView(browser.table, acceptDrop: drag, row: -1, dropOperation: .on)
+        : browser.collectionView(browser.collection, acceptDrop: drag, indexPath: IndexPath(item: browser.entries.count, section: 0), dropOperation: .before)
+      try check(backgroundAccepted, "\(mode): background release still accepts a same-directory move")
+      try await until { !browser.busy && !browser.loading }
+      try check(browser.lastError == nil && (try Data(contentsOf: payload)) == Data("preserved".utf8) && (try Data(contentsOf: existing)) == Data("existing".utf8), "\(mode): same-directory release leaves files intact without a warning")
+      let incoming = source.appendingPathComponent("incoming.txt"), moved = folder.appendingPathComponent("incoming.txt")
+      try Data("incoming".utf8).write(to: incoming)
+      board.clearContents(); board.writeObjects([incoming as NSURL])
+      let movedIntoFolder = mode == .details
+        ? browser.tableView(browser.table, acceptDrop: drag, row: row, dropOperation: .on)
+        : browser.collectionView(browser.collection, acceptDrop: drag, indexPath: IndexPath(item: row, section: 0), dropOperation: .on)
+      try check(movedIntoFolder, "\(mode): dropping into a different folder still accepts a move")
+      try await until { !browser.busy && !browser.loading }
+      try check(browser.lastError == nil && !fm.fileExists(atPath: incoming.path) && (try Data(contentsOf: moved)) == Data("incoming".utf8), "\(mode): a valid folder drop moves the file intact")
+      try fm.removeItem(at: moved)
+    }
+    board.clearContents(); board.writeObjects([target as NSURL])
+    let tab = browser.tabsDocument.subviews.compactMap { $0 as? ExplorerTabView }.first!
+    let tabDrag = TransferUIDrag(view: tab, board: board, point: .zero)
+    try check(tab.draggingEntered(tabDrag).isEmpty && !tab.performDragOperation(tabDrag), "Folder tabs reject their own folder without starting a transfer")
+    func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+    let breadcrumb = descendants(browser.addressBar).compactMap { $0 as? ExplorerButton }.first { $0.title == target.lastPathComponent }!
+    let breadcrumbDrag = TransferUIDrag(view: breadcrumb, board: board, point: .zero)
+    try check(breadcrumb.draggingEntered(breadcrumbDrag).isEmpty && !breadcrumb.performDragOperation(breadcrumbDrag), "Address breadcrumbs reject their own folder without starting a transfer")
+    board.clearContents(); board.writeObjects([existing as NSURL])
+    let copy = TransferUIDrag(view: browser.collection, board: board, point: .zero)
+    try check(browser.collectionView(browser.collection, acceptDrop: copy, indexPath: IndexPath(item: browser.entries.count, section: 0), dropOperation: .before), "Copying within the current folder is still accepted")
+    try await until { !browser.busy && !browser.loading }
+    let duplicate = browser.entries.first { $0.url != existing && !$0.isDirectory }
+    try check(browser.lastError == nil && duplicate != nil && (try Data(contentsOf: duplicate!.url)) == Data("existing".utf8), "Same-directory copying creates a numbered duplicate")
+    try fm.removeItem(at: duplicate!.url)
+    board.clearContents(); board.writeObjects([file as NSURL])
     for action in ["skip", "sheet-cancel", "escape", "cancel", "close", "keep-both", "retry"] {
       fputs("Collision fixture: \(action)\n", stderr)
       let panel = NativeTransferPanel(parent: window, showsWindows: false)

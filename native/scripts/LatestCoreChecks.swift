@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 @main
 enum LatestCoreChecks {
@@ -37,6 +38,54 @@ enum LatestCoreChecks {
     do { _ = try searchNames("^(a+)+$", .regex); throw CocoaError(.validationMissingMandatoryProperty) }
     catch { try expect((error as NSError).domain == "FileSearch" && (error as NSError).code == 2, "Pathological regex is interrupted") }
     try FileManager.default.removeItem(at: expensive)
+    let topLevel = try FileSearch.search(in: root, query: "", showHidden: false, filters: FileSearchFilters(scope: .folder, kind: .file)).entries.map(\.name)
+    try expect(topLevel.contains("file.txt") && !topLevel.contains("Report.PDF") && !topLevel.contains("项目"), "Search filters can limit results to files in the current folder")
+    let documents = try FileSearch.search(in: root, query: "", showHidden: false, filters: FileSearchFilters(kind: .document)).entries.map(\.name).sorted()
+    try expect(documents == ["Report.PDF", "a[1].txt", "file.txt"], "Search filters identify supported document types without entering packages")
+    for mode in [FileSearchMode.wildcard, .regex] {
+      let filtered = try FileSearch.search(in: root, query: "", showHidden: false, mode: mode, filters: FileSearchFilters(kind: .document)).entries.map(\.name).sorted()
+      try expect(filtered == documents, "\(mode): filters work without a filename expression")
+    }
+    let empty = try FileSearch.search(in: root, query: "", showHidden: false, filters: FileSearchFilters(size: .empty)).entries.map(\.name).sorted()
+    try expect(empty == ["Report.PDF", "a[1].txt"], "Search filters use already-read file sizes")
+    try expect(FinderTags.normalize(["  工作  ", "工作", "红色\n6", ""]) == ["工作", "红色"], "Finder tag names normalize Finder color suffixes and duplicates")
+    let tagged = FinderTags.set(["待办", "待办"], on: [file], replacing: [])
+    try expect(tagged.errors.isEmpty && (try FinderTags.names(at: file)) == ["待办"], "Finder tags write through to macOS file metadata")
+    let untagged = FinderTags.set([], on: [file], replacing: ["待办"])
+    try expect(untagged.errors.isEmpty && (try FinderTags.names(at: file)).isEmpty, "Finder tags can be removed without changing file content")
+    func storedTags(_ url: URL) throws -> [String] {
+      let size = getxattr(url.path, "com.apple.metadata:_kMDItemUserTags", nil, 0, 0, 0)
+      guard size >= 0 else { throw POSIXError(.EIO) }
+      var data = Data(count: size)
+      let read = data.withUnsafeMutableBytes { getxattr(url.path, "com.apple.metadata:_kMDItemUserTags", $0.baseAddress, size, 0, 0) }
+      guard read == size else { throw POSIXError(.EIO) }
+      return try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as! [String]
+    }
+    func seedTags(_ names: [String], at url: URL) throws {
+      let data = try PropertyListSerialization.data(fromPropertyList: names, format: .binary, options: 0)
+      try expect(data.withUnsafeBytes { setxattr(url.path, "com.apple.metadata:_kMDItemUserTags", $0.baseAddress, data.count, 0, 0) } == 0, "Seed Finder-compatible colored tags")
+    }
+    let peer = folder.appendingPathComponent("Report.PDF")
+    let originalTags = ["Shared\n4", "OnlyA\n6"], peerTags = ["Shared\n4", "OnlyB\n2"]
+    try seedTags(originalTags, at: file); try seedTags(peerTags, at: peer)
+    let common = try FinderTags.commonNames(in: [file, peer])
+    try expect(common == ["Shared"], "Batch editor starts with the tags shared by every selected file")
+    let unchanged = FinderTags.set(common, on: [file, peer], replacing: common)
+    try expect(unchanged.errors.isEmpty && (try storedTags(file)) == originalTags && (try storedTags(peer)) == peerTags, "Applying unchanged batch tags preserves each file's unique tags and colors")
+    let added = FinderTags.set(["shared", "Added"], on: [file, peer], replacing: common)
+    try expect(added.errors.isEmpty && (try storedTags(file)) == originalTags + ["Added\n0"] && (try storedTags(peer)) == peerTags + ["Added\n0"], "Adding a batch tag preserves existing spelling, unique tags and colors")
+    try seedTags(peerTags + ["Added\n0", "Later\n3"], at: peer)
+    let removed = FinderTags.set(["Added"], on: [file, peer], replacing: ["Shared", "Added"])
+    try expect(removed.errors.isEmpty && (try storedTags(file)) == ["OnlyA\n6", "Added\n0"] && (try storedTags(peer)) == ["OnlyB\n2", "Added\n0", "Later\n3"], "Removing a shared tag preserves unique and subsequently added tags")
+    let partial = FinderTags.set(["Added"], on: [file, root.appendingPathComponent("missing-tag-target")], replacing: ["Added"])
+    try expect(partial.succeeded == [file] && partial.errors.count == 1, "Batch tag errors identify the failed file without hiding successful edits")
+    let corrupt = Data("invalid Finder metadata".utf8)
+    try expect(corrupt.withUnsafeBytes { setxattr(peer.path, "com.apple.metadata:_kMDItemUserTags", $0.baseAddress, corrupt.count, 0, 0) } == 0, "Seed corrupt tag metadata")
+    let rejected = FinderTags.set(["Replacement"], on: [peer], replacing: [])
+    try expect(rejected.succeeded.isEmpty && rejected.errors.count == 1 && getxattr(peer.path, "com.apple.metadata:_kMDItemUserTags", nil, 0, 0, 0) == corrupt.count, "Unreadable tag metadata fails without being replaced")
+    try expect(try Data(contentsOf: file) == Data("preserved".utf8) && Data(contentsOf: peer).isEmpty, "Tag edits preserve every file's content")
+    let filterRoundTrip = FileSearchFilters(scope: .folder, kind: .image, date: .week, size: .small, tag: "  待办  ")
+    try expect(FileSearchFilters(propertyList: filterRoundTrip.propertyList) == FileSearchFilters(scope: .folder, kind: .image, date: .week, size: .small, tag: "待办"), "Search filters persist only bounded user choices")
     let candidates = [FinderFavorite(path: folder.path, name: "收藏名称"), FinderFavorite(path: alias.path, name: "Alias duplicate"), FinderFavorite(path: file.path, name: "File"), FinderFavorite(path: app.path, name: "App"), FinderFavorite(path: "relative", name: "Invalid"), FinderFavorite(path: root.appendingPathComponent("missing").path, name: "Missing")]
     let result = FinderFavoritesReader.filter(candidates)
     try expect(result.places.count == 1 && result.places[0].name == "收藏名称", "Finder deduplicates aliases and retains the first display name")

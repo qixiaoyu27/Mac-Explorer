@@ -37,6 +37,8 @@ final class ExplorerAddressBar: NSView, NSTextFieldDelegate {
   var onNavigate: ((URL) -> Void)?
   var onSubmit: ((String) -> Void)?
   var onCopyAddress: ((String) -> Void)?
+  var onFileDragValidate: ((NSDraggingInfo, URL) -> NSDragOperation)?
+  var onFileDrop: ((NSDraggingInfo, URL) -> Bool)?
   var onError: ((Error) -> Void)?
   var labelForPath: ((URL) -> String)?
   var showHidden = false
@@ -148,6 +150,8 @@ final class ExplorerAddressBar: NSView, NSTextFieldDelegate {
       let name = pathLabel(target)
       let item = ExplorerButton(title: name) { [weak self] in guard let self else { return }; if target == self.url { self.beginEditing() } else { self.onNavigate?(target) } }
       item.onContextMenu = { [weak self] in self?.addressMenu(target, event: $0) }; item.toolTip = target == url ? NL("单击编辑路径") : target.path
+      item.onFileDragValidate = { [weak self] info in self?.onFileDragValidate?(info, target) ?? [] }
+      item.onFileDrop = { [weak self] info in self?.onFileDrop?(info, target) ?? false }
       let width = (name as NSString).size(withAttributes: [.font: ExplorerTypography.font()]).width + 16
       item.horizontalPadding = 8; item.frame = NSRect(x: x, y: 0, width: width, height: crumbs.bounds.height); crumbs.addSubview(item); x += width
       let arrow = ExplorerButton(icon: "chevronRight"); arrow.iconDimension = 13; arrow.setAccessibilityLabel(NL("{0} 的子文件夹", name)); arrow.frame = NSRect(x: x, y: 0, width: 18, height: 27)
@@ -185,8 +189,11 @@ final class ExplorerAddressBar: NSView, NSTextFieldDelegate {
 final class ExplorerSearchBox: NSView {
   let field = ExplorerTextField()
   private let icon = ExplorerButton(icon: "search")
+  private let filters = ExplorerButton(icon: "sort")
   var onSearch: (() -> Void)?
   var onClear: (() -> Void)?
+  var onFilters: (() -> Void)?
+  var filtersActive = false { didSet { filters.active = filtersActive; filters.toolTip = filtersActive ? NL("已启用筛选") : NL("筛选") } }
   override var isFlipped: Bool { true }
   override var intrinsicContentSize: NSSize { NSSize(width: 245, height: 35) }
   override init(frame: NSRect) {
@@ -195,16 +202,18 @@ final class ExplorerSearchBox: NSView {
     field.font = ExplorerTypography.font(); field.textColor = ExplorerPalette.text
     field.target = self; field.action = #selector(submit)
     field.setAccessibilityLabel(NL("搜索文件"))
-    addSubview(field); addSubview(icon)
+    filters.setAccessibilityLabel(NL("筛选")); filters.toolTip = NL("筛选")
+    addSubview(field); addSubview(icon); addSubview(filters)
     icon.onPress = { [weak self] in
       guard let self else { return }
       if self.field.stringValue.isEmpty { self.onSearch?() } else { self.field.stringValue = ""; self.onClear?(); self.update() }
     }
+    filters.onPress = { [weak self] in self?.onFilters?() }
   }
   required init?(coder: NSCoder) { fatalError() }
   @objc private func submit() { onSearch?(); update() }
   func update() { icon.iconName = field.stringValue.isEmpty ? "search" : "close"; needsDisplay = true }
-  override func layout() { super.layout(); field.frame = NSRect(x: 10, y: (bounds.height - ExplorerTypography.lineHeight) / 2, width: max(0, bounds.width - 43), height: ExplorerTypography.lineHeight); icon.frame = NSRect(x: bounds.width - 33, y: 5, width: 25, height: 25) }
+  override func layout() { super.layout(); field.frame = NSRect(x: 10, y: (bounds.height - ExplorerTypography.lineHeight) / 2, width: max(0, bounds.width - 68), height: ExplorerTypography.lineHeight); filters.frame = NSRect(x: bounds.width - 58, y: 5, width: 25, height: 25); icon.frame = NSRect(x: bounds.width - 31, y: 5, width: 25, height: 25) }
   override func draw(_ dirtyRect: NSRect) {
     let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
     ExplorerPalette.input.setFill(); path.fill(); ExplorerPalette.border.setStroke(); path.lineWidth = 1; path.stroke()

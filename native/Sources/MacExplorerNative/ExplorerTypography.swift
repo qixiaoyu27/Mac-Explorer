@@ -14,7 +14,7 @@ enum ExplorerTypography {
     view.invalidateIntrinsicContentSize(); view.needsLayout = true; view.needsDisplay = true
     for child in view.subviews { resizeControls(in: child, by: delta) }
   }
-  static func font(ofSize size: CGFloat = 13, weight: NSFont.Weight = .medium) -> NSFont {
-    .systemFont(ofSize: size + baseSize - 13, weight: weight == .regular ? .medium : weight)
+  static func font(ofSize size: CGFloat = 13, weight: NSFont.Weight = .regular) -> NSFont {
+    .systemFont(ofSize: size + baseSize - 13, weight: weight)
   }
 }

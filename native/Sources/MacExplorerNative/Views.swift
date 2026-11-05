@@ -75,6 +75,11 @@ func label(_ text: String, size: CGFloat = 13, color: NSColor = ExplorerPalette.
   field.font = ExplorerTypography.font(ofSize: size == 12 ? 13 : size); field.textColor = color; field.lineBreakMode = .byTruncatingTail
   return field
 }
+private func explorerPointerIsInside(_ view: NSView) -> Bool {
+  guard let window = view.window, window.isKeyWindow, !view.isHiddenOrHasHiddenAncestor else { return false }
+  let point = view.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+  return view.bounds.contains(point) && view.visibleRect.contains(point)
+}
 func pin(_ child: NSView, to parent: NSView, inset: CGFloat = 0) {
   child.translatesAutoresizingMaskIntoConstraints = false; parent.addSubview(child)
   NSLayoutConstraint.activate([child.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: inset), child.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -inset), child.topAnchor.constraint(equalTo: parent.topAnchor, constant: inset), child.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -inset)])
@@ -227,15 +232,18 @@ final class ExplorerHeaderCell: NSTableHeaderCell {
   override func drawSortIndicator(withFrame cellFrame: NSRect, in controlView: NSView, ascending: Bool, priority: Int) {}
 }
 final class FileRowView: NSTableRowView {
+  override var isSelected: Bool { didSet { for column in 0..<numberOfColumns { (view(atColumn: column) as? NameCell)?.checkbox.state = isSelected ? .on : .off } } }
   var hovered = false { didSet { for column in 0..<numberOfColumns { (view(atColumn: column) as? NameCell)?.checkbox.hovered = hovered }; needsDisplay = true } }
   override func updateTrackingAreas() {
     super.updateTrackingAreas(); trackingAreas.forEach(removeTrackingArea)
-    addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
+    addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self))
+    hovered = explorerPointerIsInside(self)
   }
-  override func mouseEntered(with event: NSEvent) { hovered = true }
-  override func mouseExited(with event: NSEvent) { hovered = false }
+  override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); hovered = explorerPointerIsInside(self) }
+  override func mouseEntered(with event: NSEvent) { hovered = explorerPointerIsInside(self) }
+  override func mouseExited(with event: NSEvent) { hovered = explorerPointerIsInside(self) }
   override func drawBackground(in dirtyRect: NSRect) {
-    ExplorerPalette.surface.setFill()
+    (hovered && !isSelected ? ExplorerPalette.rowHover : ExplorerPalette.surface).setFill()
     NSBezierPath(roundedRect: bounds, xRadius: 3, yRadius: 3).fill()
   }
   override func drawSelection(in dirtyRect: NSRect) {
@@ -493,7 +501,7 @@ final class ItemSurface: SurfaceView {
   var bottomLine = false
   private var expandedName: NativeExpandedNameView?
   private var scrollObserver: NSObjectProtocol?
-  override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); if window == nil { expandedName?.removeFromSuperview(); expandedName = nil; if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver) }; scrollObserver = nil } }
+  override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); hovered = explorerPointerIsInside(self); if window == nil { expandedName?.removeFromSuperview(); expandedName = nil; if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver) }; scrollObserver = nil } }
   deinit { if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver) } }
   override func layout() {
     super.layout(); expandedName?.removeFromSuperview(); expandedName = nil
@@ -508,18 +516,19 @@ final class ItemSurface: SurfaceView {
     }
     let rect = convert(name.frame, to: collection)
     guard convert(bounds, to: collection).intersects(collection.visibleRect), rect.intersects(collection.visibleRect) else { return }
-    let measured = (name.stringValue as NSString).boundingRect(with: NSSize(width: max(1, rect.width - 4), height: 10_000), options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: name.font ?? NSFont.systemFont(ofSize: 12)])
-    guard measured.height > rect.height else { return }
     let overlay = NativeExpandedNameView(name: name, selected: true)
-    overlay.frame = NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: ceil(measured.height) + 4)
+    let measured = overlay.text.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: max(1, rect.width - 4), height: 10_000))
+    guard measured.height > rect.height else { return }
+    let itemRect = convert(bounds, to: collection)
+    overlay.frame = NSRect(x: itemRect.minX, y: rect.minY, width: itemRect.width, height: ceil(measured.height) + 4)
     collection.addSubview(overlay); expandedName = overlay
   }
-  override func updateTrackingAreas() { super.updateTrackingAreas(); trackingAreas.forEach(removeTrackingArea); addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)) }
-  override func mouseEntered(with event: NSEvent) { hovered = true }
-  override func mouseExited(with event: NSEvent) { hovered = false }
+  override func updateTrackingAreas() { super.updateTrackingAreas(); trackingAreas.forEach(removeTrackingArea); addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self)); hovered = explorerPointerIsInside(self) }
+  override func mouseEntered(with event: NSEvent) { hovered = explorerPointerIsInside(self) }
+  override func mouseExited(with event: NSEvent) { hovered = explorerPointerIsInside(self) }
   override func draw(_ dirtyRect: NSRect) {
     ExplorerPalette.surface.setFill(); bounds.fill()
-    if selected { ExplorerPalette.selection.setFill(); NSBezierPath(roundedRect: bounds, xRadius: 3, yRadius: 3).fill() }
+    if selected || hovered { (selected ? ExplorerPalette.selection : ExplorerPalette.rowHover).setFill(); NSBezierPath(roundedRect: bounds, xRadius: 3, yRadius: 3).fill() }
     if bottomLine { ExplorerPalette.border.setFill(); NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill() }
   }
 }
@@ -537,6 +546,8 @@ final class IconItem: NSCollectionViewItem {
     let leading: CGFloat = checkboxes && horizontal ? 30 : 12
     checkbox.available = checkboxes; checkbox.hovered = surface.hovered; checkbox.frame = NSRect(x: 7, y: horizontal ? (height - 14) / 2 : 8, width: 14, height: 14)
     nameLabel.alignment = horizontal ? .left : .center; nameLabel.maximumNumberOfLines = horizontal ? 1 : 2
+    nameLabel.lineBreakMode = horizontal ? .byTruncatingTail : nameLabel.isEditable ? .byCharWrapping : .byWordWrapping
+    nameLabel.cell?.truncatesLastVisibleLine = !nameLabel.isEditable
     kindLabel.isHidden = mode != .tiles && mode != .content; dateLabel.isHidden = mode != .content; pathLabel.isHidden = mode != .content
     surface.bottomLine = mode == .content
     if horizontal {

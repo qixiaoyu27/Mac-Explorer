@@ -36,6 +36,31 @@ enum ExplorerDialogs {
     form.field.selectText(nil)
   }
 
+  static func searchTag(in window: NSWindow, initial: String, submit: @escaping (String) -> Void) {
+    tagInput(in: window, title: NL("Finder 标签筛选"), value: initial, fieldTitle: NL("标签名称")) { value in
+      submit(value.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+  }
+
+  static func finderTags(in window: NSWindow, initial: [String], count: Int, submit: @escaping ([String]) -> Void) {
+    tagInput(in: window, title: NL("Finder 标签") + " · \(count)", value: initial.joined(separator: ", "), fieldTitle: NL("标签名称（逗号分隔）")) { value in
+      let names = value.split(separator: ",", omittingEmptySubsequences: false).map { String($0) }
+      submit(FinderTags.normalize(names))
+    }
+  }
+
+  private static func tagInput(in window: NSWindow, title: String, value: String, fieldTitle: String, submit: @escaping (String) -> Void) {
+    let form = EDNameForm(value: value, title: fieldTitle)
+    let dialog = EDPresentation(parent: window, title: title, size: NSSize(width: 430, height: 246), body: form)
+    dialog.surface.primary.title = NL("应用")
+    dialog.onSubmit = { [weak dialog, weak form] in
+      guard let dialog, let value = form?.field.stringValue else { return }
+      dialog.close(); submit(value)
+    }
+    dialog.present(focus: form.field)
+    form.field.selectText(nil)
+  }
+
   static func batchRename(in window: NSWindow, sources: [URL], submit: @escaping (BatchRenameOptions) -> Void) {
     let form = EDBatchRenameForm(sources: sources)
     let body = EDScrollingBody(); body.flow.padding = 0
@@ -613,9 +638,10 @@ private final class EDNameForm: EDView, NSTextFieldDelegate {
   let field = ExplorerTextField()
   weak var extra: NSTextField?
   var onChange: ((String) -> Void)?
-  private let label = edLabel(NL("名称"))
+  private let label: NSTextField
   private var editing = false
-  init(value: String) {
+  init(value: String, title: String = NL("名称")) {
+    label = edLabel(title)
     super.init(frame: .zero)
     field.stringValue = value
     field.font = ExplorerTypography.font()
@@ -625,7 +651,7 @@ private final class EDNameForm: EDView, NSTextFieldDelegate {
     field.drawsBackground = false
     field.focusRingType = .none
     field.delegate = self
-    field.setAccessibilityLabel(NL("名称"))
+    field.setAccessibilityLabel(title)
     addSubview(label)
     addSubview(field)
   }

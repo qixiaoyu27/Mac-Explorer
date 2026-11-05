@@ -69,6 +69,8 @@ private func drawExplorerFocus(in rect: NSRect) {
 final class ExplorerButton: NSButton {
   var onPress: (() -> Void)?
   var onContextMenu: ((NSEvent) -> Void)?
+  var onFileDragValidate: ((NSDraggingInfo) -> NSDragOperation)?
+  var onFileDrop: ((NSDraggingInfo) -> Bool)?
   var active = false { didSet { needsDisplay = true } }
   var iconColor: NSColor? { didSet { needsDisplay = true } }
   var iconName: String? { didSet { updateMetrics() } }
@@ -76,6 +78,7 @@ final class ExplorerButton: NSButton {
   var iconDimension: CGFloat = 18 { didSet { updateMetrics() } }
   var horizontalPadding: CGFloat = 8 { didSet { updateMetrics() } }
   private var hovered = false
+  private var fileDropHovered = false
   private var hoverArea: NSTrackingArea?
 
   init(title: String = "", icon: String? = nil, dropdown: Bool = false, action: (() -> Void)? = nil) {
@@ -90,6 +93,7 @@ final class ExplorerButton: NSButton {
     focusRingType = .none
     target = self
     self.action = #selector(pressed)
+    registerForDraggedTypes([.fileURL])
     updateMetrics()
   }
 
@@ -146,7 +150,7 @@ final class ExplorerButton: NSButton {
     effectiveAppearance.performAsCurrentDrawingAppearance {
       NSGraphicsContext.saveGraphicsState()
       defer { NSGraphicsContext.restoreGraphicsState() }
-      let background: NSColor? = active || (isEnabled && cell?.isHighlighted == true)
+      let background: NSColor? = active || fileDropHovered || (isEnabled && cell?.isHighlighted == true)
         ? ExplorerPalette.pressed : (hovered && isEnabled ? ExplorerPalette.hover : nil)
       if let background {
         background.setFill()
@@ -169,6 +173,21 @@ final class ExplorerButton: NSButton {
       }
       if isEnabled && window?.firstResponder === self && ExplorerFocus.keyboardVisible { drawExplorerFocus(in: bounds) }
     }
+  }
+
+  override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { draggingUpdated(sender) }
+  override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+    let operation = onFileDragValidate?(sender) ?? []
+    fileDropHovered = !operation.isEmpty; needsDisplay = true
+    return operation
+  }
+  override func draggingExited(_ sender: NSDraggingInfo?) { fileDropHovered = false; needsDisplay = true }
+  override func draggingEnded(_ sender: NSDraggingInfo) { fileDropHovered = false; needsDisplay = true }
+  override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { !(onFileDragValidate?(sender) ?? []).isEmpty }
+  override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    let accepted = onFileDrop?(sender) ?? false
+    fileDropHovered = false; needsDisplay = true
+    return accepted
   }
 }
 

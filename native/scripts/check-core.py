@@ -8,7 +8,7 @@ import sys
 import tempfile
 
 root = pathlib.Path(__file__).resolve().parents[1]
-names = ["GroupingChecks", "CoreChecks", "ColumnChecks", "NetworkDeletionChecks", "FileActionChecks", "BatchRenameChecks", "MetadataTransferChecks", "ServerSideTransferChecks", "TransferTelemetryChecks", "PropertiesChecks", "WatcherChecks", "QuickAccessChecks", "LatestCoreChecks", "NetworkChecks", "TrashChecks", "SystemChecks"]
+names = ["GroupingChecks", "CoreChecks", "ColumnChecks", "NetworkDeletionChecks", "FileActionChecks", "BatchRenameChecks", "MetadataTransferChecks", "ServerSideTransferChecks", "TransferTelemetryChecks", "PropertiesChecks", "WatcherChecks", "QuickAccessChecks", "LatestCoreChecks", "NetworkChecks", "TrashChecks", "SystemChecks", "CloudDriveChecks"]
 parser = argparse.ArgumentParser()
 def check_name(value):
     if value not in names:
