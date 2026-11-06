@@ -3,7 +3,7 @@ import Darwin
 
 @main
 enum LatestCoreChecks {
-  static func main() throws {
+  static func main() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("native-latest-core-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -178,6 +178,31 @@ enum LatestCoreChecks {
     do { _ = try NativeCommand.run(executable: "/usr/bin/false", arguments: []); throw CocoaError(.validationMissingMandatoryProperty) } catch let error as NativeCommandError { try expect(error.result.status != 0, "Command errors retain the actual exit status") }
     do { _ = try NativeCommand.run(executable: "/bin/sleep", arguments: ["3"], timeout: 0.1); throw CocoaError(.validationMissingMandatoryProperty) } catch { try expect((error as NSError).domain == "NativeCommand", "Native commands enforce deadlines") }
     do { _ = try NativeCommand.run(executable: "/usr/bin/head", arguments: ["-c", "4096", "/dev/zero"], limit: 128); throw CocoaError(.validationMissingMandatoryProperty) } catch { try expect((error as NSError).domain == "NativeCommand", "Native commands enforce output limits") }
+    let concurrent = try await withThrowingTaskGroup(of: Bool.self) { group in
+      for _ in 0..<12 {
+        group.addTask {
+          let result = try NativeCommand.run(executable: "/bin/sh", arguments: ["-c", "/usr/bin/head -c 262144 /dev/zero & /usr/bin/head -c 262144 /dev/zero >&2 & wait"], timeout: 10)
+          return result.output == Data(repeating: 0, count: 262144) && result.error == result.output
+        }
+      }
+      var passed = 0
+      for try await success in group { if success { passed += 1 } }
+      return passed
+    }
+    try expect(concurrent == 12, "Concurrent commands drain both full pipes without extra reader workers or data loss")
+    do { _ = try NativeCommand.run(executable: "/bin/sh", arguments: ["-c", "/usr/bin/head -c 4096 /dev/zero >&2"], limit: 128); throw CocoaError(.validationMissingMandatoryProperty) }
+    catch { try expect((error as NSError).domain == "NativeCommand" && (error as NSError).code == 2, "Command stderr has the same bounded capture as stdout") }
+    let inheritedStart = Date()
+    do { _ = try NativeCommand.run(executable: "/bin/sh", arguments: ["-c", "/bin/sleep 4 &"]); throw CocoaError(.validationMissingMandatoryProperty) }
+    catch { try expect(error is CocoaError && Date().timeIntervalSince(inheritedStart) < 3.5, "Inherited pipes time out without closing a handle under a blocked reader") }
+    let started = DispatchSemaphore(value: 0)
+    let cancelled = Task.detached { try NativeCommand.run(executable: "/bin/sleep", arguments: ["10"], onStart: { _ in started.signal() }) }
+    let didStart = await withCheckedContinuation { continuation in
+      DispatchQueue.global().async { continuation.resume(returning: started.wait(timeout: .now() + 3) == .success) }
+    }
+    cancelled.cancel()
+    do { _ = try await cancelled.value; throw CocoaError(.validationMissingMandatoryProperty) }
+    catch { try expect(didStart && error is CancellationError, "Cancelling an active command terminates it and releases its pipes") }
     try expect(try String(contentsOf: file, encoding: .utf8) == "preserved", "All source fixture contents remain unchanged")
     print("LatestCoreChecks: \(checks) checks passed.")
   }

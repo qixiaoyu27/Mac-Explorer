@@ -28,6 +28,8 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   private var vcsStatus: NativeVCSStatus?
   private var vcsGeneration = 0
   private var vcsReads = 0
+  private var vcsTask: Task<NativeVCSStatus?, Error>?
+  private var vcsPendingRefresh: Bool?
   private var vcsTimer: Timer?
   private var groupingTimer: Timer?
   private var reconnectTask: Task<Void, Never>?
@@ -159,7 +161,10 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   private let byteFormatter = ByteCountFormatter(), dateFormatter = DateFormatter()
   private var detailsPreview: QLPreviewView?
   private let paneScroll = NSScrollView(), paneBody = SurfaceView()
-  private var paneRequest = UUID()
+  private var paneEntry: FileEntry?
+  private var paneReadEntry: FileEntry?
+  private var paneReadTask: Task<NativeFilePreview, Error>?
+  private var panePreview: (FileEntry, NativeFilePreview)?
 
   init(initial: URL, defaults: UserDefaults) {
     self.defaults = defaults; places = QuickAccessState(defaults: defaults); tabs = [BrowserTab(history: [initial])]
@@ -753,7 +758,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     directoryWatcher.watch(directory.isFileURL && !searchActive ? directory : nil) { [weak self] in self?.scheduleAutomaticRefresh() }
     cancelInlineRename()
     ExplorerMenu.dismiss(); generation += 1; queryGeneration += 1; loadTask?.cancel(); queryTask?.cancel(); searchTask?.cancel()
-    vcsStatus = nil
+    vcsStatus = nil; vcsGeneration += 1; vcsTask?.cancel(); vcsPendingRefresh = nil
     let token = generation, target = directory; startedAt = Date(); loading = true; lastError = nil; snapshot = nil; entries = []
     addressBar.homeDirectory = home
     addressBar.setDirectory(target, title: target.isFileURL ? nil : locationLabel(target)); addressBar.showHidden = showHidden; search.placeholderString = NL("在{0}中搜索", locationLabel(target)); search.isEnabled = target.host != "airdrop"; searchBox.update()
@@ -844,6 +849,8 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     guard !stopped else { return }; stopped = true; generation += 1; queryGeneration += 1
     directoryWatcher.stop(); automaticRead?.cancel(); reconnectTask?.cancel(); reconnectTask = nil; refreshWork?.cancel(); refreshWork = nil
     loadTask?.cancel(); queryTask?.cancel(); searchTask?.cancel()
+    vcsGeneration += 1; vcsTask?.cancel(); vcsPendingRefresh = nil
+    paneReadTask?.cancel(); paneEntry = nil; panePreview = nil
     inputNavigation?.close(); inputNavigation = nil; preferencesWork?.cancel(); vcsTimer?.invalidate(); vcsTimer = nil; groupingTimer?.invalidate(); groupingTimer = nil
     if let focusObserver { NotificationCenter.default.removeObserver(focusObserver); self.focusObserver = nil }
     if let preferencesObserver { NotificationCenter.default.removeObserver(preferencesObserver); self.preferencesObserver = nil }
@@ -1338,7 +1345,10 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
 
   private func togglePane(_ name: String) { paneMode = paneMode == name ? "" : name; defaults.set(paneMode, forKey: "paneMode"); updatePane(); updateStatus(); view.needsLayout = true }
   private func updatePane() {
-    paneRequest = UUID(); let request = paneRequest
+    let selected = selectedEntries()
+    paneEntry = !stopped && paneMode == "details" && selected.count == 1 && NativeFilePreview.supports(selected[0]) ? selected[0] : nil
+    if paneReadEntry != paneEntry { paneReadTask?.cancel() }
+    if panePreview?.0 != paneEntry { panePreview = nil }
     detailsPreview?.previewItem = nil; detailsPreview?.removeFromSuperview(); detailsPreview = nil
     pane.subviews.forEach { $0.removeFromSuperview() }; paneBody.subviews.forEach { $0.removeFromSuperview() }
     guard !paneMode.isEmpty else { return }
@@ -1346,30 +1356,19 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     let close = ExplorerButton(icon: "close") { [weak self] in self?.paneMode = ""; self?.defaults.set("", forKey: "paneMode"); self?.updatePane(); self?.updateStatus(); self?.view.needsLayout = true }; close.identifier = NSUserInterfaceItemIdentifier("close"); pane.addSubview(close)
     paneScroll.documentView = paneBody; paneScroll.hasVerticalScroller = true; paneScroll.autohidesScrollers = true; paneScroll.drawsBackground = false
     pane.addSubview(paneScroll)
-    let selected = selectedEntries()
     if selected.count == 1, let entry = selected.first {
       let name = label(entry.name, size: 15); name.font = .systemFont(ofSize: 15, weight: .semibold); name.identifier = NSUserInterfaceItemIdentifier("name"); paneBody.addSubview(name)
       if paneMode == "preview", !entry.isDirectory, let preview = QLPreviewView(frame: .zero, style: .normal) {
         preview.previewItem = entry.url as NSURL; paneBody.addSubview(preview); detailsPreview = preview
       } else {
         let backdrop = SurfaceView(); backdrop.color = ExplorerPalette.surface; backdrop.identifier = NSUserInterfaceItemIdentifier("preview-background"); paneBody.addSubview(backdrop)
-        let icon = FileIconView(); icon.show(entry); icon.imageScaling = .scaleProportionallyUpOrDown; icon.identifier = NSUserInterfaceItemIdentifier("icon"); paneBody.addSubview(icon)
+        let icon = FileIconView(); icon.show(entry, pixels: 140); icon.imageScaling = .scaleProportionallyUpOrDown; icon.identifier = NSUserInterfaceItemIdentifier("icon"); paneBody.addSubview(icon)
         var values = [entry.kind, NL("位置"), entry.url.deletingLastPathComponent().path, NL("大小"), entry.isDirectory ? NL("文件夹") : NL("{0}（{1} 字节）", ExplorerFormat.size(entry.size), entry.size.formatted(.number.locale(NativeLanguage.formatLocale))), NL("修改日期"), entry.modified.map(dateFormatter.string) ?? "—", NL("创建日期"), entry.created.map(dateFormatter.string) ?? "—"]
         if entry.isSymbolicLink { values += [NL("链接"), NL("符号链接")] }
         for (i, text) in values.enumerated() { let value = label(text, size: i == 0 ? 12 : 11, color: i % 2 == 1 ? ExplorerPalette.secondary : ExplorerPalette.text); value.toolTip = text; value.identifier = NSUserInterfaceItemIdentifier("value-\(i)"); paneBody.addSubview(value) }
         if paneMode == "details" {
-          Task { @MainActor [weak self, weak icon] in
-            let result = try? await Task.detached(priority: .utility) { try NativeFilePreview.read(entry) }.value
-            guard let self, self.paneRequest == request else { return }
-            if let data = result?.image { icon?.image = NSImage(data: data) }
-            if let text = result?.text {
-              let preview = NSTextView(); preview.string = text; preview.isEditable = false; preview.font = .monospacedSystemFont(ofSize: 11, weight: .regular); preview.textColor = ExplorerPalette.text; preview.backgroundColor = ExplorerPalette.surface
-              let scroll = NSScrollView(); scroll.documentView = preview; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.identifier = NSUserInterfaceItemIdentifier("text-preview"); self.paneBody.addSubview(scroll)
-              let heading = label(NL("内容预览"), size: 12); heading.identifier = NSUserInterfaceItemIdentifier("text-heading"); self.paneBody.addSubview(heading)
-              if result?.truncated == true { let note = label(NL("仅显示前 16 KB"), size: 11, color: ExplorerPalette.secondary); note.identifier = NSUserInterfaceItemIdentifier("text-limit"); self.paneBody.addSubview(note) }
-              self.layoutPane()
-            }
-          }
+          if let cached = panePreview { showPaneText(cached.1) }
+          readPaneText()
         }
       }
       let quick = ExplorerButton(title: NL("快速查看")) { [weak self] in self?.previewSelected() }
@@ -1384,6 +1383,29 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
       }
     }
     layoutPane()
+  }
+  private func readPaneText() {
+    // Cancellation may not interrupt a filesystem read; keep its slot until it finishes.
+    guard !stopped, paneReadTask == nil, let entry = paneEntry, panePreview?.0 != entry else { return }
+    let task = Task.detached(priority: .utility) { try NativeFilePreview.read(entry) }
+    paneReadTask = task; paneReadEntry = entry
+    Task { @MainActor [weak self] in
+      let result = try? await task.value
+      guard let self else { return }
+      self.paneReadTask = nil; self.paneReadEntry = nil
+      if !self.stopped, self.paneEntry == entry, !task.isCancelled {
+        let preview = result ?? NativeFilePreview()
+        self.panePreview = (entry, preview); self.showPaneText(preview); self.layoutPane()
+      }
+      self.readPaneText()
+    }
+  }
+  private func showPaneText(_ result: NativeFilePreview) {
+    guard let text = result.text else { return }
+    let preview = NSTextView(); preview.string = text; preview.isEditable = false; preview.font = .monospacedSystemFont(ofSize: 11, weight: .regular); preview.textColor = ExplorerPalette.text; preview.backgroundColor = ExplorerPalette.surface
+    let scroll = NSScrollView(); scroll.documentView = preview; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.identifier = NSUserInterfaceItemIdentifier("text-preview"); paneBody.addSubview(scroll)
+    let heading = label(NL("内容预览"), size: 12); heading.identifier = NSUserInterfaceItemIdentifier("text-heading"); paneBody.addSubview(heading)
+    if result.truncated { let note = label(NL("仅显示前 16 KB"), size: 11, color: ExplorerPalette.secondary); note.identifier = NSUserInterfaceItemIdentifier("text-limit"); paneBody.addSubview(note) }
   }
   private func layoutPane() {
     let width = pane.bounds.width
@@ -1967,7 +1989,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     needsFullDiskAccess = failure.offersPrivacySettings
     return failure.message
   }
-  deinit { reconnectTask?.cancel(); groupingTimer?.invalidate(); vcsTimer?.invalidate(); if let focusObserver { NotificationCenter.default.removeObserver(focusObserver) }; preferencesWork?.cancel(); if let preferencesObserver { NotificationCenter.default.removeObserver(preferencesObserver) }; loadTask?.cancel(); queryTask?.cancel(); searchTask?.cancel(); automaticRead?.cancel(); refreshWork?.cancel(); if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }; if let paletteObserver { NotificationCenter.default.removeObserver(paletteObserver) }; if let settingsObserver { NotificationCenter.default.removeObserver(settingsObserver) } }
+  deinit { paneReadTask?.cancel(); vcsTask?.cancel(); reconnectTask?.cancel(); groupingTimer?.invalidate(); vcsTimer?.invalidate(); if let focusObserver { NotificationCenter.default.removeObserver(focusObserver) }; preferencesWork?.cancel(); if let preferencesObserver { NotificationCenter.default.removeObserver(preferencesObserver) }; loadTask?.cancel(); queryTask?.cancel(); searchTask?.cancel(); automaticRead?.cancel(); refreshWork?.cancel(); if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }; if let paletteObserver { NotificationCenter.default.removeObserver(paletteObserver) }; if let settingsObserver { NotificationCenter.default.removeObserver(settingsObserver) } }
 }
 
 
@@ -2062,21 +2084,33 @@ extension BrowserController {
     refreshVCS(force: true)
   }
   private func refreshVCS(force: Bool = false) {
-    guard !stopped, force || vcsReads == 0 else { return }
+    guard !stopped else { return }
+    guard let service = versionControl, service.isEnabled, directory.isFileURL, !viewingTrash else {
+      vcsGeneration += 1; vcsTask?.cancel(); vcsPendingRefresh = nil
+      vcsStatus = nil; for index in entries.indices { entries[index].vcsMark = nil }; render(); return
+    }
+    guard vcsReads == 0 else { vcsPendingRefresh = (vcsPendingRefresh ?? false) || force; return }
     vcsGeneration += 1; let token = vcsGeneration, target = directory
-    guard let service = versionControl, service.isEnabled, target.isFileURL, !viewingTrash else { vcsStatus = nil; for index in entries.indices { entries[index].vcsMark = nil }; render(); return }
-    vcsReads += 1
+    vcsReads = 1
+    let task = Task.detached(priority: .utility) { try Task.checkCancellation(); return try service.status(directory: target, force: force) }
+    vcsTask = task
     Task { @MainActor [weak self] in
-      defer { self?.vcsReads -= 1 }
+      defer {
+        if let self {
+          self.vcsReads = 0; self.vcsTask = nil
+          let pending = self.vcsPendingRefresh; self.vcsPendingRefresh = nil
+          if let force = pending { self.refreshVCS(force: force) }
+        }
+      }
       do {
-        let state = try await Task.detached(priority: .utility) { try service.status(directory: target, force: force) }.value
-        guard let self, self.directory == target, self.vcsGeneration == token, !self.stopped, service.isEnabled else { return }
+        let state = try await task.value
+        guard let self, !task.isCancelled, self.directory == target, self.vcsGeneration == token, !self.stopped, service.isEnabled else { return }
         guard self.vcsStatus != state || self.entries.contains(where: { $0.vcsMark != state?.statesByPath[$0.id]?.mark }) else { return }
         self.vcsStatus = state
         for index in self.entries.indices { self.entries[index].vcsMark = state?.statesByPath[self.entries[index].id]?.mark }
         if let error = state?.error { self.operationError = error }
         self.render()
-      } catch { guard let self, self.directory == target, self.vcsGeneration == token, service.isEnabled else { return }; self.operationError = error.localizedDescription; self.render() }
+      } catch { guard let self, !task.isCancelled, !self.stopped, self.directory == target, self.vcsGeneration == token, service.isEnabled else { return }; self.operationError = error.localizedDescription; self.render() }
     }
   }
   private func showVCS(_ action: NativeVCSAction) {
