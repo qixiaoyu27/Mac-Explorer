@@ -127,6 +127,17 @@ enum NativeLifecycleChecks {
     delegate.application(NSApp, open: [target, elsewhere])
     try await until("Reveal across folders timed out") { revealed(elsewhere) }
     try check(delegate.browser.tabs.count == tabCount + 1 && delegate.browser.selectedPaths == [elsewhere.path], "External files in different folders open separate tabs")
+    let package = other.appendingPathComponent("Fixture.app")
+    try fm.createDirectory(at: package.appendingPathComponent("Contents"), withIntermediateDirectories: true)
+    delegate.browser.reload()
+    delegate.application(NSApp, open: [package])
+    try await until("Reveal of an application bundle timed out") { revealed(package) }
+    try check(delegate.browser.selectedPaths == [package.path], "An external application bundle is selected in its folder, not entered")
+    delegate.application(NSApp, open: [nested])
+    try await until("External folder open timed out") { !delegate.browser.loading && delegate.browser.directory.path == nested.path }
+    try check(delegate.browser.selectedPaths.isEmpty, "An external folder opens directly")
+    delegate.browser.navigate(to: big)
+    try await until("Return to the fixture folder timed out") { !delegate.browser.loading && delegate.browser.directory.path == big.path }
     let beforeMissing = delegate.browser.directory.path
     delegate.application(NSApp, open: [big.appendingPathComponent("missing.txt")])
     try await until("Missing item error timed out") { delegate.browser.lastError == NL("项目不存在或无法访问") }

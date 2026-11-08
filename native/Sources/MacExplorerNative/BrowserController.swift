@@ -2149,11 +2149,12 @@ struct ExternalOpenGroup {
 
 extension BrowserController {
   // Files sharing a folder stay together in one tab; a folder opens on its own.
+  // Packages such as .app bundles behave as files: reveals must not enter them.
   static func externalGroups(_ urls: [URL]) -> (groups: [ExternalOpenGroup], unavailable: Int) {
     var groups: [ExternalOpenGroup] = [], unavailable = 0
     for url in urls {
-      guard url.isFileURL, !url.path.contains("\0"), let values = try? url.resourceValues(forKeys: [.isDirectoryKey]) else { unavailable += 1; continue }
-      if values.isDirectory == true { groups.append(ExternalOpenGroup(directory: url)); continue }
+      guard url.isFileURL, !url.path.contains("\0"), let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey]) else { unavailable += 1; continue }
+      if values.isDirectory == true && values.isPackage != true { groups.append(ExternalOpenGroup(directory: url)); continue }
       let parent = url.deletingLastPathComponent()
       if let index = groups.firstIndex(where: { !$0.selection.isEmpty && $0.directory.path == parent.path }) { groups[index].selection.append(url) }
       else { groups.append(ExternalOpenGroup(directory: parent, selection: [url])) }
