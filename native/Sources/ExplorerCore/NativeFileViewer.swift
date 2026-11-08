@@ -5,22 +5,39 @@ public struct NativeFileViewerState {
   public let enabled: Bool
   public let canRestore: Bool
   public let error: String
+  public let canEnable: Bool
+  public let staleViewer: Bool
 }
 
 public final class NativeFileViewer {
   // NSFileViewer is a compatibility preference, not a complete Finder replacement.
+  public static let promptSuppressedKey = "fileViewerPromptSuppressed"
   private let appID = "local.macexplorer.native-prototype"
   let domain = "com.apple.LaunchServices/com.apple.launchservices.secure" as CFString
   let key = "NSFileViewer" as CFString
   private let testFile: URL?
   private let backupURL: URL
-  public init(backupURL: URL, fixture: URL? = nil, failFirstWrite: Bool = false) { self.backupURL = backupURL; self.testFile = fixture; self.failNextWrite = fixture != nil && failFirstWrite }
+  private let appExists: (String) -> Bool
+  public init(backupURL: URL, fixture: URL? = nil, failFirstWrite: Bool = false, appExists: @escaping (String) -> Bool = { _ in true }) { self.backupURL = backupURL; self.testFile = fixture; self.failNextWrite = fixture != nil && failFirstWrite; self.appExists = appExists }
   private var ours: [[String: Any]] { [["LSHandlerContentType": "public.folder", "LSHandlerRoleAll": appID]] }
   let missingBackup = "缺少有效的原设置备份，无法自动恢复。"
   let conflict = "文件查看器设置已被其他应用更改，已停止操作以保留这些更改。"
   func failure(_ message: String) -> NSError { NSError(domain: "MacExplorer.FileViewer", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
   func same(_ a: Any?, _ b: Any?) -> Bool { (a as? NSObject ?? NSNull()).isEqual(b as? NSObject ?? NSNull()) }
   func folders(_ records: [[String: Any]]) -> [[String: Any]] { records.filter { ($0["LSHandlerContentType"] as? String) == "public.folder" } }
+  // A viewer preference survives its application's removal, and AppKit then falls back to Finder.
+  func stale(_ value: Any?) -> Bool {
+    guard let id = value as? String, !id.isEmpty, id != "-", id != appID else { return false }
+    return !appExists(id)
+  }
+  func staleHandler(_ record: [String: Any]) -> Bool { record.contains { $0.key.hasPrefix("LSHandlerRole") && stale($0.value) } }
+  func enableBlocker(before: [String: Any], original: [[String: Any]], owned: Bool, backup: [String: Any]?, backupError: String) -> String? {
+    if !backupError.isEmpty { return backupError }
+    guard let backup else {
+      return !same(before["global"], appID) && !folders(original).contains(where: { $0.values.contains { same($0, appID) } }) ? nil : missingBackup
+    }
+    return owned || (same(before["global"], backup["global"]) && same(folders(original), previousFolders(backup))) ? nil : conflict
+  }
   func read() throws -> [String: Any] {
     if let file = testFile {
       guard FileManager.default.fileExists(atPath: file.path) else { return [:] }
@@ -86,9 +103,8 @@ public final class NativeFileViewer {
       do { backup = try loadBackup(backupURL) } catch { backupError = missingBackup }
     }
     if action == "enable" {
-      if !backupError.isEmpty { throw failure(backupError) }
+      if let blocker = enableBlocker(before: before, original: original, owned: owned, backup: backup, backupError: backupError) { throw failure(blocker) }
       if backup == nil {
-        guard !same(before["global"], appID) && !folders(original).contains(where: { $0.values.contains { same($0, appID) } }) else { throw failure(missingBackup) }
         var value: [String: Any] = ["globalExists": before["global"] != nil, "handlersExist": before["handlers"] != nil,
           "folders": original.enumerated().filter { ($0.element["LSHandlerContentType"] as? String) == "public.folder" }.map { ["index": $0.offset, "value": $0.element] as [String: Any] }]
         value["global"] = before["global"]
@@ -97,7 +113,6 @@ public final class NativeFileViewer {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backupURL.path)
         backup = value
       }
-      guard owned || (same(before["global"], backup!["global"]) && same(folders(original), previousFolders(backup!))) else { throw failure(conflict) }
       var next = before; next["global"] = appID
       next["handlers"] = original.filter { ($0["LSHandlerContentType"] as? String) != "public.folder" } + ours
       try apply(next, before: before)
@@ -105,9 +120,9 @@ public final class NativeFileViewer {
       guard let backup else { throw failure(missingBackup) }
       guard owned else { throw failure(conflict) }
       var next = before
-      next["global"] = backup["global"]
+      next["global"] = stale(backup["global"]) ? nil : backup["global"]
       var restored = original.filter { ($0["LSHandlerContentType"] as? String) != "public.folder" }
-      for entry in backup["folders"] as! [[String: Any]] { restored.insert(entry["value"] as! [String: Any], at: min(entry["index"] as! Int, restored.count)) }
+      for entry in backup["folders"] as! [[String: Any]] where !staleHandler(entry["value"] as! [String: Any]) { restored.insert(entry["value"] as! [String: Any], at: min(entry["index"] as! Int, restored.count)) }
       next["handlers"] = restored.isEmpty && !(backup["handlersExist"] as! Bool) ? nil : restored
       try apply(next, before: before)
       try FileManager.default.removeItem(at: backupURL)
@@ -116,7 +131,17 @@ public final class NativeFileViewer {
     let enabled = same(state["global"], appID) || folders(current).contains { $0.values.contains { same($0, appID) } }
     let canRestore = same(state["global"], appID) && same(folders(current), ours) && (try? loadBackup(backupURL)) != nil
     let message = enabled && !canRestore ? (backupError.isEmpty && backup != nil ? conflict : missingBackup) : ""
-    return NativeFileViewerState(enabled: enabled, canRestore: canRestore, error: message)
-
+    var blockerBackup: [String: Any]?, blockerError = ""
+    if FileManager.default.fileExists(atPath: backupURL.path) {
+      do { blockerBackup = try loadBackup(backupURL) } catch { blockerError = missingBackup }
+    }
+    let currentOwned = same(state["global"], appID) && same(folders(current), ours)
+    let canEnable = !enabled && enableBlocker(before: state, original: current, owned: currentOwned, backup: blockerBackup, backupError: blockerError) == nil
+    return NativeFileViewerState(enabled: enabled, canRestore: canRestore, error: message, canEnable: canEnable, staleViewer: !enabled && (stale(state["global"]) || folders(current).contains(where: staleHandler)))
+  }
+  // Ask on each launch until the user opts out, and only from the bundle these preferences would point at.
+  public func shouldPromptAtLaunch(suppressed: Bool, bundleID: String?) -> Bool {
+    guard !suppressed, bundleID == appID, let state = try? perform("status") else { return false }
+    return state.canEnable
   }
 }

@@ -16,7 +16,7 @@ final class NativeSystemSettingsView: SurfaceView {
   }
   required init?(coder: NSCoder) { fatalError() }
   private func refreshViewer() {
-    do { let value = try integration.fileViewer.perform("status"); viewer.checked = value.enabled; viewer.isEnabled = !value.enabled || value.canRestore; if !value.error.isEmpty { status.stringValue = NL(value.error) } }
+    do { let value = try integration.fileViewer.perform("status"); viewer.checked = value.enabled; viewer.isEnabled = !value.enabled || value.canRestore; if !value.error.isEmpty { status.stringValue = NL(value.error) } else if value.staleViewer { status.stringValue = NL("当前文件查看器已不可用") } }
     catch { viewer.isEnabled = false; status.stringValue = NL(error.localizedDescription) }
   }
   @objc private func toggleViewer() {
@@ -24,6 +24,7 @@ final class NativeSystemSettingsView: SurfaceView {
     let alert = NSAlert(); alert.messageText = enabling ? NL("使用 Mac Explorer 显示文件？") : NL("恢复原文件查看器设置？")
     alert.addButton(withTitle: NL("确定")); alert.addButton(withTitle: NL("取消"))
     guard alert.runModal() == .alertFirstButtonReturn else { refreshViewer(); return }
+    integration.suppressFileViewerPrompt()
     do { _ = try integration.fileViewer.perform(enabling ? "enable" : "restore"); status.stringValue = NL("已保存") }
     catch { status.stringValue = NL(error.localizedDescription) }
     refreshViewer(); onHeightChange?()

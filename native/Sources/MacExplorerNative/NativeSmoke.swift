@@ -37,6 +37,11 @@ enum NativeSmoke {
         try write(["passed": true, "checks": checks], to: report)
         NSApp.terminate(nil); return
       }
+      if ProcessInfo.processInfo.arguments.contains("--smoke-lifecycle") {
+        checks += try await NativeLifecycleChecks.run(source: browser)
+        try write(["passed": true, "checks": checks], to: report)
+        NSApp.terminate(nil); return
+      }
       if ProcessInfo.processInfo.arguments.contains("--smoke-vcs-edit") {
         checks += try await NativeVCSEditingChecks.run()
         try write(["passed": true, "checks": checks], to: report)

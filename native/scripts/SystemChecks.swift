@@ -69,6 +69,36 @@ struct SystemChecks {
     try rejected("symlink backup") { _ = try viewer.perform("enable") }
     try check(read(system).isEqual(to: original), "Symlink rejection preserves preferences")
     try fm.removeItem(at: backup)
+    let native = "local.macexplorer.native-prototype"
+    let dead: Set<String> = ["com.removed.viewer", "com.removed.folders"]
+    let aware = NativeFileViewer(backupURL: backup, fixture: system, appExists: { !dead.contains($0) })
+    try check(aware.shouldPromptAtLaunch(suppressed: false, bundleID: native), "Prompt when another working viewer is set")
+    try check(!aware.perform("status").staleViewer, "Working viewer is not stale")
+    try check(!aware.shouldPromptAtLaunch(suppressed: true, bundleID: native), "Don't ask again suppresses the prompt")
+    try check(!aware.shouldPromptAtLaunch(suppressed: false, bundleID: "local.macexplorer.native-validation"), "Validation bundle never prompts")
+    try check(!aware.shouldPromptAtLaunch(suppressed: false, bundleID: nil), "Unknown bundle never prompts")
+    try check(!fm.fileExists(atPath: backup.path) && read(system).isEqual(to: original), "Prompt decision writes nothing")
+    let staleOriginal: [String: Any] = ["global":"com.removed.viewer", "handlers":[["LSHandlerContentType":"public.folder","LSHandlerRoleAll":"com.removed.folders"], ["LSHandlerContentType":"public.folder","LSHandlerRoleViewer":"com.apple.finder"], ["LSHandlerContentType":"public.text","LSHandlerRoleAll":"editor.app"]]]
+    try write(staleOriginal, system)
+    try check(aware.perform("status").staleViewer && aware.perform("status").canEnable, "Removed viewer is stale and replaceable")
+    try check(aware.shouldPromptAtLaunch(suppressed: false, bundleID: native), "Prompt when the viewer was removed")
+    try check(aware.perform("enable").canRestore, "Enable over a removed viewer")
+    try check(read(system)["global"] as? String == native, "Enable replaces a removed viewer")
+    try check(!aware.perform("status").canEnable && !aware.perform("status").staleViewer, "Enabled viewer needs no prompt")
+    try check(!aware.shouldPromptAtLaunch(suppressed: false, bundleID: native), "Enabled viewer never prompts")
+    _ = try aware.perform("restore")
+    let afterStale = try read(system)
+    try check(afterStale["global"] == nil, "Restore clears a removed viewer so Finder takes over")
+    let staleHandlers = afterStale["handlers"] as! [[String: Any]]
+    try check(staleHandlers.count == 2 && !staleHandlers.contains { $0["LSHandlerRoleAll"] as? String == "com.removed.folders" } && staleHandlers.contains { $0["LSHandlerRoleViewer"] as? String == "com.apple.finder" } && staleHandlers.contains { $0["LSHandlerRoleAll"] as? String == "editor.app" }, "Restore drops only removed folder handlers")
+    try check(!fm.fileExists(atPath: backup.path), "Restore over a removed viewer completes")
+    try write(original, system)
+    _ = try aware.perform("enable")
+    var taken = try read(system) as! [String: Any]
+    taken["global"] = "other.app"; try write(taken, system)
+    try check(!aware.shouldPromptAtLaunch(suppressed: false, bundleID: native), "Conflict with retained backup never prompts")
+    try check(read(system).isEqual(to: taken), "Conflict prompt decision preserves the other app")
+    try fm.removeItem(at: backup)
     try check(NativeUpdateValidation.compare("0.9.9", "1.0.0") == -1, "Major version update")
     try check(NativeUpdateValidation.compare("1.10.0", "1.2.9") == 1, "Numeric minor ordering")
     try rejected("invalid version") { _ = try NativeUpdateValidation.compare("1.0.0-beta", "1.0.0") }

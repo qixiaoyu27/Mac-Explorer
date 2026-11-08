@@ -95,6 +95,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     NSApp.activate(ignoringOtherApps: true)
     if (quitFixture != nil || smoke == nil && comparison == nil) && argument("--path") == nil && pendingExternalURLs.isEmpty { restoreWindows(defaults: defaults) }
     if !pendingExternalURLs.isEmpty { let urls = pendingExternalURLs; pendingExternalURLs = []; openExternal(urls) }
+    if smoke == nil && comparison == nil { DispatchQueue.main.async { [weak self] in self?.offerFileViewer() } }
     if let comparison, let report = argument("--report") {
       Task { @MainActor in
         await NativeSmoke.compare(browser: browser, window: window, root: URL(fileURLWithPath: comparison), report: URL(fileURLWithPath: report))
@@ -105,6 +106,11 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         await NativeSmoke.run(browser: browser, window: window, root: URL(fileURLWithPath: smoke), report: URL(fileURLWithPath: report))
       }
     }
+  }
+
+  private func offerFileViewer() {
+    guard let systemIntegration, let window, systemIntegration.shouldPromptForFileViewer, !ExplorerDialogs.isPresenting(in: window) else { return }
+    ExplorerDialogs.offerFileViewer(in: window, viewer: systemIntegration.fileViewer) { [weak systemIntegration] in systemIntegration?.suppressFileViewerPrompt() }
   }
 
   private func register(_ window: NSWindow, browser: BrowserController) {
