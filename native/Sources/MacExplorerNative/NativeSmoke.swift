@@ -14,6 +14,11 @@ enum NativeSmoke {
       checks.append(name)
     }
     do {
+      if ProcessInfo.processInfo.arguments.contains("--smoke-desktop") {
+        checks += try await NativeDesktopChecks.run()
+        try write(["passed": true, "checks": checks], to: report)
+        NSApp.terminate(nil); return
+      }
       if let index = CommandLine.arguments.firstIndex(of: "--quit-session-suite"), CommandLine.arguments.indices.contains(index + 1) {
         try await NativeQuitChecks.child(browser: browser, window: window, root: root, suite: CommandLine.arguments[index + 1], report: report)
         return

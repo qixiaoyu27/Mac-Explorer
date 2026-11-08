@@ -64,6 +64,10 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     })
     versionControl.setEnabled(defaults.object(forKey: "versionControl") as? Bool ?? true)
     let home = ProcessInfo.processInfo.environment["EXPLORER_NATIVE_HOME"].map { URL(fileURLWithPath: $0) } ?? FileManager.default.homeDirectoryForCurrentUser
+    let desktopDirectory = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first ?? home.appendingPathComponent("Desktop")
+    systemIntegration?.configureDesktop(directory: desktopDirectory, openFolder: { [weak self] url in
+      self?.application(NSApp, open: [url])
+    })
     browser = BrowserController(initial: NativeStartLocation.initialURL(explicit: quitFixture == nil ? explicitLocation : nil, defaults: defaults, home: home), defaults: defaults)
     if smoke != nil || comparison != nil { browser.filePasteboard = NSPasteboard(name: .init("local.macexplorer.native-test.\(ProcessInfo.processInfo.processIdentifier)")) }
     if let comparison {
@@ -95,6 +99,8 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     NSApp.activate(ignoringOtherApps: true)
     if (quitFixture != nil || smoke == nil && comparison == nil) && argument("--path") == nil && pendingExternalURLs.isEmpty { restoreWindows(defaults: defaults) }
     if !pendingExternalURLs.isEmpty { let urls = pendingExternalURLs; pendingExternalURLs = []; openExternal(urls) }
+    // Smoke/comparison processes must never cover the user's real desktop.
+    if smoke == nil && comparison == nil { systemIntegration?.desktop?.restore() }
     if let comparison, let report = argument("--report") {
       Task { @MainActor in
         await NativeSmoke.compare(browser: browser, window: window, root: URL(fileURLWithPath: comparison), report: URL(fileURLWithPath: report))

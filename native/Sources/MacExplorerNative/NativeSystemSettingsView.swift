@@ -2,19 +2,38 @@ import AppKit
 import ExplorerCore
 
 final class NativeSystemSettingsView: SurfaceView {
-  var preferredHeight: CGFloat { status.stringValue.isEmpty ? 28 : 58 }
+  var preferredHeight: CGFloat { 60 + (status.stringValue.isEmpty ? 0 : 30) + (desktopStatus.stringValue.isEmpty ? 0 : 42) }
   var onHeightChange: (() -> Void)?
   private let integration: NativeSystemIntegration
   private let viewer = EDButton(title: NL("使用 Mac Explorer 显示文件"), style: .checkbox)
   private let help = NativeHelpButton(text: NL("使用 Mac Explorer 处理部分系统“在文件夹中显示”请求；关闭后恢复原设置。Finder 仍保留。"), accessibilityLabel: NL("系统文件查看器说明"))
   private let status = label("", size: 12)
+  private let desktop = EDButton(title: NL("启用桌面接管"), style: .checkbox)
+  private let desktopHelp = NativeHelpButton(text: NL("由 Mac Explorer 显示桌面图标；双击文件夹在本应用打开，文件使用默认应用。关闭或退出后恢复 Finder 桌面。使用静态壁纸，不显示桌面小组件。"), accessibilityLabel: NL("桌面接管说明"))
+  private let desktopStatus = label("", size: 12)
+  private var desktopObserver: NSObjectProtocol?
   init(integration: NativeSystemIntegration) {
     self.integration = integration; super.init(frame: .zero); color = .clear
-    [viewer, help, status].forEach(addSubview)
+    [viewer, help, status, desktop, desktopHelp, desktopStatus].forEach(addSubview)
     viewer.onPress = { [weak self] in self?.toggleViewer() }
+    desktop.onPress = { [weak self] in
+      guard let self, let service = self.integration.desktop else { return }
+      service.setEnabled(!service.enabled)
+    }
+    if let service = integration.desktop {
+      desktopObserver = NotificationCenter.default.addObserver(forName: NativeDesktop.didChange, object: service, queue: .main) { [weak self] _ in self?.refreshDesktop() }
+    }
     refreshViewer()
+    refreshDesktop()
   }
+  deinit { if let desktopObserver { NotificationCenter.default.removeObserver(desktopObserver) } }
   required init?(coder: NSCoder) { fatalError() }
+  private func refreshDesktop() {
+    desktop.checked = integration.desktop?.enabled ?? false
+    desktop.isEnabled = integration.desktop != nil
+    desktopStatus.stringValue = integration.desktop?.error ?? ""
+    onHeightChange?()
+  }
   private func refreshViewer() {
     do { let value = try integration.fileViewer.perform("status"); viewer.checked = value.enabled; viewer.isEnabled = !value.enabled || value.canRestore; if !value.error.isEmpty { status.stringValue = NL(value.error) } }
     catch { viewer.isEnabled = false; status.stringValue = NL(error.localizedDescription) }
@@ -31,7 +50,11 @@ final class NativeSystemSettingsView: SurfaceView {
   override func layout() {
     super.layout(); let width = bounds.width
     viewer.frame = NSRect(x: 0, y: 0, width: width - 32, height: 28); help.frame = NSRect(x: width - 24, y: 0, width: 24, height: 28)
-    status.frame = NSRect(x: 0, y: 30, width: width, height: 28); status.maximumNumberOfLines = 2
+    desktop.frame = NSRect(x: 0, y: 30, width: width - 32, height: 28)
+    desktopHelp.frame = NSRect(x: width - 24, y: 30, width: 24, height: 28)
+    status.frame = NSRect(x: 0, y: 60, width: width, height: 28); status.maximumNumberOfLines = 2
+    desktopStatus.frame = NSRect(x: 0, y: 60 + (status.stringValue.isEmpty ? 0 : 30), width: width, height: 42)
+    desktopStatus.maximumNumberOfLines = 2
   }
 }
 

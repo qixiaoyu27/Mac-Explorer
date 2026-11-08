@@ -11,6 +11,11 @@ final class NativeSystemIntegration {
   private(set) var wakeShortcut = ""
   private(set) var wakeError = ""
   let fileViewer: NativeFileViewer
+  private(set) var desktop: NativeDesktop?
+  func configureDesktop(directory: URL, openFolder: @escaping (URL) -> Void) {
+    desktop?.stop()
+    desktop = NativeDesktop(defaults: defaults, directory: directory, openFolder: openFolder)
+  }
   init(defaults: UserDefaults, onWake: @escaping () -> Void) {
     self.defaults = defaults; self.onWake = onWake
     let fixtureRoot = ProcessInfo.processInfo.environment["MAC_EXPLORER_NATIVE_SYSTEM_FIXTURE"].map { URL(fileURLWithPath: $0) }
@@ -28,6 +33,7 @@ final class NativeSystemIntegration {
   }
   deinit { close() }
   func close() {
+    desktop?.stop()
     if let hotKey { UnregisterEventHotKey(hotKey); self.hotKey = nil }
     if let handler { RemoveEventHandler(handler); self.handler = nil }
   }

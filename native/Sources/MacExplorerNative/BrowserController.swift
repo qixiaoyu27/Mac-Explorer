@@ -1910,6 +1910,8 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   }
   private func shortcutHint(_ action: String) -> String { ExplorerShortcuts.bindings(action, overrides: shortcutOverrides).first.map(ExplorerShortcuts.display) ?? "" }
   func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    // A desktop selection must never trigger commands on a background browser.
+    if NativeDesktop.owns(NSApp.keyWindow) { return false }
     if let editor = NSApp.keyWindow?.firstResponder as? NSTextView {
       if menuItem.action == #selector(undo(_:)) { return editor.undoManager?.canUndo == true }
       if menuItem.action == #selector(redo(_:)) { return editor.undoManager?.canRedo == true }

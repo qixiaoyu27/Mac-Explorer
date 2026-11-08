@@ -28,6 +28,22 @@ open 'native/output/validation/Mac Explorer.app'
 
 普通构建 Bundle ID 为 `local.macexplorer.native-prototype`；测试构建为 `local.macexplorer.native-validation`。构建只写入忽略提交的 `native/output/` 与 `native/.build/`，不安装应用。产物是本地 ad-hoc 签名，没有 Developer ID 签名或 Apple 公证。
 
+### 桌面接管
+
+在「设置 → 常规 → 系统文件查看器（实验）」中，原有文件查看器开关下方可开启「启用桌面接管」，默认关闭。开启后由应用显示桌面目录中的可见文件；双击普通文件夹或文件夹符号链接在 Mac Explorer 打开，文件和应用包交给系统默认应用。开关独立于「使用 Mac Explorer 显示文件」，不需要修改系统文件查看器或辅助功能权限；macOS 可能要求授权访问桌面目录，读取失败时保持 Finder 桌面可用。
+
+桌面支持多选、键盘导航、回车或 Command+↓ 打开、Command+A 全选、Command+C 复制和向其他窗口拖出复制。右键可打开桌面目录、刷新或关闭接管；重命名、删除、粘贴及拖入等文件管理操作在打开的 Mac Explorer 窗口进行。桌面目录发生新增、重命名或删除时自动刷新，隐藏文件不显示。
+
+接管使用桌面图标层级的独立窗口，覆盖所有显示器，图标集中显示在主显示器，其他应用窗口保持在上层；显示器变化时重新布局。它不更改 Finder 配置或桌面文件，关闭开关、退出或进程结束即移除覆盖层；启用状态会在下次手动启动应用时恢复，不会注册开机启动。此版本使用系统壁纸的静态图像和独立网格布局，不复现动态壁纸、Finder 图标位置、桌面小组件、挂载卷图标或 Stage Manager 的桌面行为。
+
+桌面功能的隔离 AppKit 检查（仅 macOS，夹具为临时目录，不操作真实桌面文件）：
+
+```sh
+python3 -I native/scripts/smoke.py --validation --desktop
+```
+
+该检查覆盖开关生命周期、文件夹/文件/应用包路由、实际双击事件、目录变化刷新、读取失败及文件保留。真实桌面权限弹窗、多屏/Spaces、系统“显示桌面”、动态壁纸及 Stage Manager 仍需 macOS 实机验收。
+
 ## 功能实现
 
 以下是已接入源码的能力清单。实际检查结果以本轮终端输出及新生成的检查报告为准，不把旧截图或旧报告当作本轮验收。

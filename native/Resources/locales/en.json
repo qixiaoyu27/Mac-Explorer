@@ -1036,5 +1036,13 @@
   "清除筛选": "Clear filters",
   "筛选": "Filter",
   "已启用筛选": "Filters on",
-  "应用": "Apply"
+  "应用": "Apply",
+  "启用桌面接管": "Enable desktop takeover",
+  "桌面接管说明": "About desktop takeover",
+  "由 Mac Explorer 显示桌面图标；双击文件夹在本应用打开，文件使用默认应用。关闭或退出后恢复 Finder 桌面。使用静态壁纸，不显示桌面小组件。": "Mac Explorer displays desktop icons. Double-click folders to open them here; files open in their default apps. Disabling or quitting restores the Finder desktop. Uses a still wallpaper and does not display desktop widgets.",
+  "无法读取桌面：{0}": "Cannot read the Desktop: {0}",
+  "Mac Explorer 桌面": "Mac Explorer Desktop",
+  "在 Mac Explorer 中打开桌面": "Open Desktop in Mac Explorer",
+  "关闭桌面接管": "Disable desktop takeover",
+  "无法读取桌面壁纸，请选择静态壁纸后重试。": "Cannot read the desktop wallpaper. Choose a still wallpaper and try again."
 }
