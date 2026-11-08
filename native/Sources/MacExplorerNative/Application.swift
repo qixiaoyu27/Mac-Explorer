@@ -207,10 +207,18 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     application(sender, open: filenames.map { URL(fileURLWithPath: $0) }); sender.reply(toOpenOrPrint: .success)
   }
   private func openExternal(_ urls: [URL]) {
-    let files = urls.filter { $0.isFileURL && !$0.path.contains("\0") }
-    if let first = files.first { browser.openExternal(first) }
-    for url in files.dropFirst() { browser.openTab(at: (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true ? url : url.deletingLastPathComponent()); browser.openExternal(url) }
-    window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+    let (groups, unavailable) = BrowserController.externalGroups(urls)
+    useExternalWindow()
+    if let first = groups.first { browser.openExternal(first) }
+    for group in groups.dropFirst() { browser.openTab(at: group.directory); browser.openExternal(group) }
+    if unavailable > 0 { browser.reportUnavailableExternalItems() }
+    summon()
+  }
+  // A window on another Space or behind a dialog would hide the result, so it stays untouched.
+  private func useExternalWindow() {
+    let usable = { (owner: NSWindow) in owner.isOnActiveSpace && !ExplorerDialogs.isPresenting(in: owner) }
+    if let current = window, usable(current) { return }
+    if let other = browserWindows.last(where: usable) { activate(other) } else { newWindow() }
   }
   func applicationWillTerminate(_ notification: Notification) {
     systemIntegration?.close(); versionControl.setEnabled(false)

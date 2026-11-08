@@ -2142,12 +2142,34 @@ extension BrowserController {
 }
 
 
+struct ExternalOpenGroup {
+  let directory: URL
+  var selection: [URL] = []
+}
+
 extension BrowserController {
-  func openExternal(_ url: URL) {
-    guard url.isFileURL, !url.path.contains("\0"), let values = try? url.resourceValues(forKeys: [.isDirectoryKey]) else { return }
-    if values.isDirectory == true { navigate(to: url) }
-    else { navigate(to: url.deletingLastPathComponent()); selectedPaths = [url.path] }
+  // Files sharing a folder stay together in one tab; a folder opens on its own.
+  static func externalGroups(_ urls: [URL]) -> (groups: [ExternalOpenGroup], unavailable: Int) {
+    var groups: [ExternalOpenGroup] = [], unavailable = 0
+    for url in urls {
+      guard url.isFileURL, !url.path.contains("\0"), let values = try? url.resourceValues(forKeys: [.isDirectoryKey]) else { unavailable += 1; continue }
+      if values.isDirectory == true { groups.append(ExternalOpenGroup(directory: url)); continue }
+      let parent = url.deletingLastPathComponent()
+      if let index = groups.firstIndex(where: { !$0.selection.isEmpty && $0.directory.path == parent.path }) { groups[index].selection.append(url) }
+      else { groups.append(ExternalOpenGroup(directory: parent, selection: [url])) }
+    }
+    return (groups, unavailable)
   }
+  func openExternal(_ group: ExternalOpenGroup) {
+    navigate(to: group.directory)
+    guard !group.selection.isEmpty else { return }
+    // Replaces the state navigate prepared, which would otherwise reveal the previous folder.
+    let paths = group.selection.map { directory.appendingPathComponent($0.lastPathComponent).path }
+    var state = pendingLocationState ?? BrowserLocationState()
+    state.selection = Set(paths); state.revealPath = paths[0]
+    prepareLocationState(state)
+  }
+  func reportUnavailableExternalItems() { operationError = NL("项目不存在或无法访问"); render() }
 }
 
 
