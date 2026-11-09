@@ -94,7 +94,7 @@ enum ExplorerDialogs {
     }
   }
 
-  static func confirm(in window: NSWindow, title: String, detail: String, confirmTitle: String, remember: ((Bool) -> Void)? = nil, action: @escaping () -> Void) {
+  static func confirm(in window: NSWindow, title: String, detail: String, confirmTitle: String, remember: ((Bool) -> Void)? = nil, rememberWhenCancelled: Bool = false, action: @escaping () -> Void) {
     let body = EDScrollingBody()
     body.flow.padding = 0
     let detailLabel = edLabel(detail, size: 13, wraps: true, selectable: true)
@@ -104,13 +104,26 @@ enum ExplorerDialogs {
     let height = min(440, max(236, 144 + edTextHeight(detail, width: 380, size: 13) + (remember == nil ? 0 : 32)))
     let dialog = EDPresentation(parent: window, title: title, size: NSSize(width: 430, height: height), body: body)
     dialog.surface.primary.title = confirmTitle
+    if rememberWhenCancelled { dialog.onClose = { remember?(checkbox.state == .on) } }
     dialog.onSubmit = { [weak dialog] in
       guard let dialog else { return }
-      remember?(checkbox.state == .on)
+      if !rememberWhenCancelled { remember?(checkbox.state == .on) }
       dialog.close()
       action()
     }
     dialog.present(focus: dialog.surface.primary)
+  }
+
+  static func offerFileViewer(in window: NSWindow, viewer: NativeFileViewer, suppress: @escaping () -> Void) {
+    let stale = (try? viewer.perform("status").staleViewer) == true
+    confirm(in: window, title: NL("使用 Mac Explorer 显示文件？"), detail: stale ? NL("当前文件查看器已不可用。可在设置中恢复。") : NL("可在设置中恢复。"), confirmTitle: NL("确定"), remember: { if $0 { suppress() } }, rememberWhenCancelled: true) { [weak window] in
+      do { _ = try viewer.perform("enable") }
+      catch {
+        guard let window else { return }
+        let alert = NSAlert(); alert.messageText = NL(error.localizedDescription); alert.addButton(withTitle: NL("确定"))
+        alert.beginSheetModal(for: window) { _ in }
+      }
+    }
   }
 
   static func properties(in window: NSWindow, title: String, icon: NSImage?, values: [(String, String)], rename: ((String) -> Void)? = nil, load: (() async throws -> EDPropertyValues)? = nil) {

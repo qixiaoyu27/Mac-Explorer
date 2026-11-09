@@ -79,6 +79,33 @@ import Foundation
     let actualFile = try actual.finish(result, directory: root)
     let actualReport = try JSONSerialization.jsonObject(with: Data(contentsOf: actualFile)) as! [String: Any]
     try expect((actualReport["methods"] as? [String: Int])?["systemCopy"] == 1 && actualReport["systemAcknowledgedBytes"] as? Int == 1_048_576, "Completed local operation writes its method, stages and byte counts to the bounded report")
+    for changeSource in [false, true] {
+      let destination = root.appendingPathComponent(changeSource ? "source-change" : "target-change")
+      try fm.createDirectory(at: destination, withIntermediateDirectories: false)
+      let diagnostics = TransferDiagnostics()
+      var payload: URL?, mutated = false
+      var hooks = TransferHooks(); hooks.forceCopyMove = true
+      hooks.checkpoint = { stage, _, target in if stage == .afterCopy { payload = target } }
+      hooks.control = FileTransferControl(onProblem: { _ in .skip }, onPhase: { phase in
+        guard phase == .properties, let payload, !mutated else { return }
+        mutated = true
+        let path = changeSource ? input.path : payload.path
+        precondition(setxattr(path, "local.macexplorer.fixture", "x", 1, 0, 0) == 0)
+      }, onTiming: { diagnostics.record($0) })
+      let failed = FileActions.transfer([input], to: destination, move: true, hooks: hooks)
+      try expect(mutated && !failed.errors.isEmpty && failed.consumedMoveSources.isEmpty && fm.fileExists(atPath: input.path), "Metadata change at restore retains the source")
+      let reportFile = try diagnostics.finish(failed, directory: root)
+      let bytes = try Data(contentsOf: reportFile)
+      let report = try JSONSerialization.jsonObject(with: bytes) as! [String: Any]
+      let stage = "properties." + (changeSource ? "source_changed" : "target_changed")
+      let entries = report["stages"] as! [[String: Any]]
+      let detail = entries.first { $0["stage"] as? String == stage }
+      try expect(detail?["failures"] as? Int == 1 && (detail?["metrics"] as? [String: Double])?["ctime"] == 1, "Restore diagnostics identify the changed side and ctime field")
+      try expect((detail?["metrics"] as? [String: Double])?.filter { $0.key != "ctime" }.values.allSatisfy { $0 == 0 } == true, "Ctime-only fixture does not report changes to identity, contents or other dates")
+      let serialized = String(decoding: bytes, as: UTF8.self)
+      try expect(!serialized.contains(input.path) && !serialized.contains(input.lastPathComponent) && !serialized.contains(payload!.path), "Mismatch diagnostics contain field counters without file names or paths")
+      try expect(try fm.contentsOfDirectory(atPath: destination.path).isEmpty, "Rejected metadata change removes only the private incomplete copy")
+    }
     print("TransferTelemetryChecks: \(count) passed")
   }
 }

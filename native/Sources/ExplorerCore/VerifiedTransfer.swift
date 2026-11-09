@@ -76,6 +76,20 @@ struct TransferStamp: Equatable {
     // regular-file size is a stable content guard across these attribute refreshes.
     sameObject(other) && mode == other.mode && (type != S_IFREG || size == other.size) && modified.matches(other.modified, precision: max(precision, other.precision)) && (ignoreChangeTime || precision == 100 && other.precision == 100 || changed.matches(other.changed, precision: max(precision, other.precision)))
   }
+  func requireUnchanged(_ other: Self, control: FileTransferControl?, stage: String) throws {
+    guard !unchanged(other) else { return }
+    let unit = max(precision, other.precision)
+    // Record differing fields, never file identities, timestamps, names or paths.
+    control?.recordTiming(stage, seconds: 0, succeeded: false, metrics: [
+      "device": device == other.device ? 0 : 1, "inode": inode == other.inode ? 0 : 1,
+      "type": type == other.type ? 0 : 1, "mode": mode == other.mode ? 0 : 1,
+      "size": type != S_IFREG || size == other.size ? 0 : 1,
+      "birth": birth.matches(other.birth, precision: unit) ? 0 : 1,
+      "mtime": modified.matches(other.modified, precision: unit) ? 0 : 1,
+      "ctime": changed.matches(other.changed, precision: unit) ? 0 : 1,
+    ])
+    throw VerifiedTransfer.failure("项目在传输期间发生变化，已停止操作。")
+  }
 }
 
 private final class TransferFD {
@@ -222,13 +236,13 @@ private struct TransferTree {
       try withParent(node.relative, expected: index) { parent, name in
         let flags = O_RDONLY | O_CLOEXEC | O_NONBLOCK | (node.stamp.type == S_IFLNK ? O_SYMLINK : O_NOFOLLOW)
         let file = try TransferFD(openat(parent, name, flags))
-        guard try original.stamp.unchanged(file.stamp) else { throw VerifiedTransfer.failure("项目在传输期间发生变化，已停止操作。") }
+        try original.stamp.requireUnchanged(file.stamp, control: hooks.control, stage: "properties.target_changed")
         defer { if let stamp = try? file.stamp { updated?(TransferNode(relative: node.relative, stamp: stamp, link: original.link, companion: try? AppleDoubleCompanion.stamp(in: parent, primary: name))) } }
         if let restore = hooks.restoreDates { try restore(file.raw, node.stamp) }
         else { try VerifiedTransfer.restoreDates(file.raw, node.stamp) }
         try tree.withParent(node.relative, expected: sourceIndex) { directory, name in
           let from = try TransferFD(openat(directory, name, flags))
-          guard try node.stamp.unchanged(from.stamp) else { throw VerifiedTransfer.failure("项目在传输期间发生变化，已停止操作。") }
+          try node.stamp.requireUnchanged(from.stamp, control: hooks.control, stage: "properties.source_changed")
           if node.stamp.type != S_IFLNK, node.stamp.mode & 0o222 == 0, try file.stamp.mode & 0o222 != 0 {
             throw VerifiedTransfer.failure("无法保留只读权限，来源已保留。")
           }
@@ -271,7 +285,7 @@ private struct TransferTree {
       try hooks.control?.check()
       try source.withParent(node.relative, expected: sourceIndex) { directory, name in
         let from = try TransferFD(openat(directory, name, O_RDONLY | O_CLOEXEC | O_NONBLOCK | (node.stamp.type == S_IFLNK ? O_SYMLINK : O_NOFOLLOW)))
-        guard try node.stamp.unchanged(from.stamp) else { throw VerifiedTransfer.failure("项目在传输期间发生变化，已停止操作。") }
+        try node.stamp.requireUnchanged(from.stamp, control: hooks.control, stage: "copy.source_changed")
         try withParent(node.relative, expected: owned) { directory, name in
           let to = try TransferFD(openat(directory, name, O_CLOEXEC | O_NONBLOCK | (node.stamp.type == S_IFDIR ? O_RDONLY | O_DIRECTORY | O_NOFOLLOW : node.stamp.type == S_IFLNK ? O_RDWR | O_SYMLINK : O_RDWR | O_NOFOLLOW)))
           guard let expected = owned[node.relative], try expected.stamp.sameObject(to.stamp) else { throw VerifiedTransfer.posix(ESTALE) }

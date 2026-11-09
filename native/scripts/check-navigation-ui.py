@@ -29,7 +29,7 @@ with tempfile.TemporaryDirectory(prefix="native-navigation-ui-") as temporary:
         "-Xcc", "-I" + str(root / "Sources/SMBTransport/include"),
         "-Xcc", "-fmodule-map-file=" + str(root / "Vendor/libsmb2/include/module.modulemap"),
         "-Xcc", "-I" + str(root / "Vendor/libsmb2/include"),
-        *map(str, sources), str(root / "scripts/WorkflowUIChecks.swift"), str(root / "scripts/SearchTagUIChecks.swift"), str(root / "scripts/MemoryUIChecks.swift"), str(root / "scripts/NavigationUIChecks.swift"), *map(str, objects), "-o", str(executable),
+        *map(str, sources), str(root / "scripts/WorkflowUIChecks.swift"), str(root / "scripts/SearchTagUIChecks.swift"), str(root / "scripts/MemoryUIChecks.swift"), str(root / "scripts/SidebarEjectUIChecks.swift"), str(root / "scripts/RefreshUIChecks.swift"), str(root / "scripts/ExternalOpenUIChecks.swift"), str(root / "scripts/NavigationUIChecks.swift"), *map(str, objects), "-o", str(executable),
     ], check=True)
     subprocess.run([str(executable), str(root / "Resources/locales"), str(output)], check=True, timeout=60)
 data = json.loads(report.read_text())

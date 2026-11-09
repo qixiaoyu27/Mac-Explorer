@@ -32,7 +32,7 @@ for script in ["install-native.sh", "update-native.sh"]:
 helpers = contents / "Helpers"
 helpers.mkdir(exist_ok=True)
 archive_helper = helpers / "archive-reader"
-subprocess.run(["xcrun", "clang", "-target", f"{platform.machine()}-apple-macos13.0", "-O2", "-Wall", "-Wextra", str(root / "Helpers" / "ArchiveReader.c"), "-larchive.2", "-o", str(archive_helper)], check=True)
+subprocess.run(["xcrun", "clang", "-target", f"{platform.machine()}-apple-macos13.0", "-O2", "-Wall", "-Wextra", str(root / "Helpers" / "ArchiveReader.c"), "-larchive.2", "-liconv", "-o", str(archive_helper)], check=True)
 subprocess.run(["codesign", "--force", "--sign", "-", str(archive_helper)], check=True)
 
 shutil.copy2(root / "Vendor" / "libsmb2" / "LICENCE-LGPL-2.1.txt", contents / "Resources" / "libsmb2-LICENSE.txt")

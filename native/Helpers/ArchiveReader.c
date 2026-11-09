@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <locale.h>
+#include <iconv.h>
 
 /* Public libarchive ABI (documented in the macOS SDK man pages).
    Apple ships libarchive.2 but does not ship its headers with the SDK. */
@@ -20,6 +21,8 @@ extern int archive_read_open_filename(struct archive *, const char *, size_t);
 extern int archive_read_next_header(struct archive *, struct archive_entry **);
 extern ssize_t archive_read_data(struct archive *, void *, size_t);
 extern int archive_read_free(struct archive *);
+extern int archive_format(struct archive *);
+extern const char *archive_entry_pathname(struct archive_entry *);
 extern const char *archive_entry_pathname_utf8(struct archive_entry *);
 extern const char *archive_entry_hardlink(struct archive_entry *);
 extern unsigned short archive_entry_filetype(struct archive_entry *);
@@ -49,6 +52,27 @@ static char *safePath(const char *raw) {
     strcat(out, part);
   }
   free(copy); return out;
+}
+static char *entryPath(struct archive *a, struct archive_entry *entry) {
+  const char *raw = archive_entry_pathname_utf8(entry), *charset = "UTF-8";
+  /* ZIP's legacy charset is CP437; retain libarchive's valid UTF-8 names first. */
+  if (!raw) {
+    raw = archive_entry_pathname(entry); charset = "CP437";
+    if ((archive_format(a) & 0xff0000) != 0x50000 || !raw) return safePath(NULL);
+  }
+  size_t inputLeft = strlen(raw);
+  if (inputLeft > (SIZE_MAX - 1) / 4) fail("压缩包文件名过长。");
+  size_t outputLeft = inputLeft * 4;
+  char *converted = calloc(outputLeft + 1, 1), *output = converted, *input = (char *)raw;
+  if (!converted) fail("内存不足。");
+  /* Process arguments use decomposed macOS paths, including selected members. */
+  iconv_t conversion = iconv_open("UTF-8-MAC", charset);
+  if (conversion == (iconv_t)-1) systemFail();
+  size_t result = iconv(conversion, &input, &inputLeft, &output, &outputLeft);
+  iconv_close(conversion);
+  if (result == (size_t)-1 || inputLeft) fail("压缩包包含不安全或不支持的路径。");
+  char *name = safePath(converted);
+  free(converted); return name;
 }
 static int parentFD(int root, char *name, char **leaf) {
   int fd = dup(root); if (fd < 0) systemFail();
@@ -88,7 +112,7 @@ int main(int argc, char **argv) {
   unsigned count = 0; int status; uint64_t declared = 0, written = 0;
   while ((status = archive_read_next_header(a, &entry)) == 0) {
     if (++count > 10000) fail("压缩包超过 10,000 项限制。");
-    char *name = safePath(archive_entry_pathname_utf8(entry));
+    char *name = entryPath(a, entry);
     unsigned short type = archive_entry_filetype(entry);
     if (archive_entry_hardlink(entry) || (type != S_IFREG && type != S_IFDIR)) fail("暂不支持解压包含链接或特殊文件的压缩包。");
     int64_t size = archive_entry_size(entry);

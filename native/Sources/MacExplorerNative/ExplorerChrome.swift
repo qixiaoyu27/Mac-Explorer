@@ -359,6 +359,8 @@ final class ExplorerSidebarRow: NSView, NSDraggingSource {
     }
   }
   var onExpand: (() -> Void)? { didSet { updateDisclosure() } }
+  var onEject: (() -> Void)? { didSet { ejectButton.isHidden = onEject == nil; needsDisplay = true } }
+  var ejectEnabled = true { didSet { ejectButton.isEnabled = ejectEnabled } }
   var tint: NSColor? { didSet { needsDisplay = true } }
   private let text: String
   private let icon: String
@@ -366,6 +368,7 @@ final class ExplorerSidebarRow: NSView, NSDraggingSource {
   private let pinned: Bool
   private let onOpen: () -> Void
   private let disclosureButton = ExplorerButton(icon: "chevronRight")
+  private let ejectButton = ExplorerButton(icon: "eject")
   private var hovered = false
   private var mousePressed = false
   private var hoverArea: NSTrackingArea?
@@ -382,6 +385,13 @@ final class ExplorerSidebarRow: NSView, NSDraggingSource {
     disclosureButton.iconColor = ExplorerPalette.chevron
     disclosureButton.onPress = { [weak self] in self?.onExpand?() }
     addSubview(disclosureButton)
+    ejectButton.iconDimension = 14
+    ejectButton.iconColor = ExplorerPalette.secondary
+    ejectButton.toolTip = NL("推出")
+    ejectButton.setAccessibilityLabel(NL("推出") + " " + title)
+    ejectButton.onPress = { [weak self] in self?.onEject?() }
+    ejectButton.isHidden = true
+    addSubview(ejectButton)
     needsLayout = true
     updateDisclosure()
     setAccessibilityElement(true)
@@ -408,6 +418,7 @@ final class ExplorerSidebarRow: NSView, NSDraggingSource {
   override func layout() {
     super.layout()
     disclosureButton.frame = NSRect(x: bounds.minX + 1 + CGFloat(level) * 14, y: bounds.midY - 12, width: 20, height: 24)
+    ejectButton.frame = NSRect(x: max(bounds.minX, bounds.maxX - 32), y: bounds.midY - 12, width: 24, height: 24)
   }
 
   override func updateTrackingAreas() {
@@ -457,12 +468,22 @@ final class ExplorerSidebarRow: NSView, NSDraggingSource {
   }
   override func accessibilityPerformPress() -> Bool { onOpen(); return true }
   override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
-    guard onExpand != nil else { return nil }
-    return [NSAccessibilityCustomAction(name: expanded ? "Collapse" : "Expand", handler: { [weak self] in
-      guard let self, let onExpand = self.onExpand else { return false }
-      onExpand()
-      return true
-    })]
+    var actions: [NSAccessibilityCustomAction] = []
+    if onExpand != nil {
+      actions.append(NSAccessibilityCustomAction(name: expanded ? "Collapse" : "Expand", handler: { [weak self] in
+        guard let self, let onExpand = self.onExpand else { return false }
+        onExpand()
+        return true
+      }))
+    }
+    if onEject != nil {
+      actions.append(NSAccessibilityCustomAction(name: NL("推出"), handler: { [weak self] in
+        guard let self, self.ejectEnabled, let onEject = self.onEject else { return false }
+        onEject()
+        return true
+      }))
+    }
+    return actions.isEmpty ? nil : actions
   }
   override func becomeFirstResponder() -> Bool { needsDisplay = true; return true }
   override func resignFirstResponder() -> Bool { mousePressed = false; needsDisplay = true; return true }
@@ -482,7 +503,7 @@ final class ExplorerSidebarRow: NSView, NSDraggingSource {
       }
       let x = bounds.minX + 24 + CGFloat(level) * 14
       drawExplorerImage(ExplorerIcons.image(icon, color: tint ?? defaultTint), in: NSRect(x: x, y: bounds.midY - 9, width: 18, height: 18))
-      drawExplorerText(text, in: NSRect(x: x + 31, y: bounds.minY, width: max(0, bounds.maxX - x - 31 - (pinned ? 38 : 13)), height: bounds.height))
+      drawExplorerText(text, in: NSRect(x: x + 31, y: bounds.minY, width: max(0, bounds.maxX - x - 31 - (pinned || onEject != nil ? 38 : 13)), height: bounds.height))
       if pinned {
         NSGraphicsContext.saveGraphicsState()
         if let context = NSGraphicsContext.current?.cgContext {

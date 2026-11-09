@@ -1036,5 +1036,9 @@
   "清除筛选": "Clear filters",
   "筛选": "Filter",
   "已启用筛选": "Filters on",
-  "应用": "Apply"
+  "应用": "Apply",
+  "当前文件查看器已不可用": "The current file viewer is no longer available",
+  "当前文件查看器已不可用。可在设置中恢复。": "The current file viewer is no longer available. You can restore this in Settings.",
+  "可在设置中恢复。": "You can restore this in Settings.",
+  "项目不存在或无法访问": "The item doesn't exist or can't be accessed"
 }

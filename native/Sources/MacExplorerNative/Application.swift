@@ -95,6 +95,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     NSApp.activate(ignoringOtherApps: true)
     if (quitFixture != nil || smoke == nil && comparison == nil) && argument("--path") == nil && pendingExternalURLs.isEmpty { restoreWindows(defaults: defaults) }
     if !pendingExternalURLs.isEmpty { let urls = pendingExternalURLs; pendingExternalURLs = []; openExternal(urls) }
+    if smoke == nil && comparison == nil { DispatchQueue.main.async { [weak self] in self?.offerFileViewer() } }
     if let comparison, let report = argument("--report") {
       Task { @MainActor in
         await NativeSmoke.compare(browser: browser, window: window, root: URL(fileURLWithPath: comparison), report: URL(fileURLWithPath: report))
@@ -107,7 +108,12 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     }
   }
 
-  private func register(_ window: NSWindow, browser: BrowserController) {
+  private func offerFileViewer() {
+    guard let systemIntegration, let window, systemIntegration.shouldPromptForFileViewer, !ExplorerDialogs.isPresenting(in: window) else { return }
+    ExplorerDialogs.offerFileViewer(in: window, viewer: systemIntegration.fileViewer) { [weak systemIntegration] in systemIntegration?.suppressFileViewerPrompt() }
+  }
+
+  func register(_ window: NSWindow, browser: BrowserController) {
     browser.versionControl = versionControl; browser.systemIntegration = systemIntegration
     if !browserWindows.contains(where: { $0 === window }) { browserWindows.append(window) }; window.delegate = self
     browser.onLanguageChange = { [weak self, weak browser] mode in
@@ -201,10 +207,18 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     application(sender, open: filenames.map { URL(fileURLWithPath: $0) }); sender.reply(toOpenOrPrint: .success)
   }
   private func openExternal(_ urls: [URL]) {
-    let files = urls.filter { $0.isFileURL && !$0.path.contains("\0") }
-    if let first = files.first { browser.openExternal(first) }
-    for url in files.dropFirst() { browser.openTab(at: (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true ? url : url.deletingLastPathComponent()); browser.openExternal(url) }
-    window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+    let (groups, unavailable) = BrowserController.externalGroups(urls)
+    useExternalWindow()
+    if let first = groups.first { browser.openExternal(first) }
+    for group in groups.dropFirst() { browser.openTab(at: group.directory); browser.openExternal(group) }
+    if unavailable > 0 { browser.reportUnavailableExternalItems() }
+    summon()
+  }
+  // A window on another Space or behind a dialog would hide the result, so it stays untouched.
+  private func useExternalWindow() {
+    let usable = { (owner: NSWindow) in owner.isOnActiveSpace && owner.attachedSheet == nil && !ExplorerDialogs.isPresenting(in: owner) }
+    if let current = window, usable(current) { return }
+    if let other = browserWindows.last(where: usable) { activate(other) } else { newWindow() }
   }
   func applicationWillTerminate(_ notification: Notification) {
     systemIntegration?.close(); versionControl.setEnabled(false)

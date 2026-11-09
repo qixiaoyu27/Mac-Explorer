@@ -15,7 +15,7 @@ final class NativeSystemIntegration {
     self.defaults = defaults; self.onWake = onWake
     let fixtureRoot = ProcessInfo.processInfo.environment["MAC_EXPLORER_NATIVE_SYSTEM_FIXTURE"].map { URL(fileURLWithPath: $0) }
     let folder = fixtureRoot ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Mac Explorer Native")
-    fileViewer = NativeFileViewer(backupURL: folder.appendingPathComponent("native-file-viewer-backup.plist"), fixture: fixtureRoot?.appendingPathComponent("native-file-viewer-system.plist"))
+    fileViewer = NativeFileViewer(backupURL: folder.appendingPathComponent("native-file-viewer-backup.plist"), fixture: fixtureRoot?.appendingPathComponent("native-file-viewer-system.plist"), appExists: { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil })
     var type = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
     let result = InstallEventHandler(GetApplicationEventTarget(), { _, _, context -> OSStatus in
       guard let context else { return OSStatus(eventNotHandledErr) }
@@ -27,6 +27,10 @@ final class NativeSystemIntegration {
     if !saved.isEmpty { do { try setWakeShortcut(saved) } catch { wakeShortcut = saved; wakeError = error.localizedDescription } }
   }
   deinit { close() }
+  func suppressFileViewerPrompt() { defaults.set(true, forKey: NativeFileViewer.promptSuppressedKey) }
+  var shouldPromptForFileViewer: Bool {
+    fileViewer.shouldPromptAtLaunch(suppressed: defaults.bool(forKey: NativeFileViewer.promptSuppressedKey), bundleID: Bundle.main.bundleIdentifier)
+  }
   func close() {
     if let hotKey { UnregisterEventHotKey(hotKey); self.hotKey = nil }
     if let handler { RemoveEventHandler(handler); self.handler = nil }

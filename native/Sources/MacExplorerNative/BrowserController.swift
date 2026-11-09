@@ -42,6 +42,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   private(set) var snapshot: DirectorySnapshot?
   private(set) var entries: [FileEntry] = []
   private(set) var loading = false
+  private var showsLoadingPlaceholder: Bool { loading && snapshot == nil }
   private(set) var lastError: String?
   private(set) var displayedMilliseconds = 0.0
   private var pendingLocationState: BrowserLocationState?
@@ -108,6 +109,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   private var folderChildren: [String: [FileEntry]] = [:]
   private var folderErrors: [String: String] = [:]
   private var sidebarRows: [(URL, ExplorerSidebarRow)] = []
+  private var ejectingVolumes = Set<String>()
   private var places: QuickAccessState
   private var placeRows: [(URL, ExplorerSidebarRow, CGFloat)] = []
   private let placeMarker = SurfaceView()
@@ -544,12 +546,14 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     sidebarDocument.subviews.forEach { $0.removeFromSuperview() }; sidebarRows = []; placeRows = []
     var y: CGFloat = 10
     func divider() { let line = SurfaceView(frame: NSRect(x: 20, y: y + 10, width: max(0, sidebar.bounds.width - 40), height: 1)); line.color = ExplorerPalette.border; line.identifier = NSUserInterfaceItemIdentifier("divider"); sidebarDocument.addSubview(line); y += 21 }
-    func row(_ title: String, _ url: URL, _ icon: String, level: Int = 0, pinned: Bool = false) {
+    func row(_ title: String, _ url: URL, _ icon: String, level: Int = 0, pinned: Bool = false, canEject: Bool = false) {
       let item = ExplorerSidebarRow(title: title, icon: icon, level: level, pinned: pinned, onOpen: { [weak self] in self?.navigate(to: url) })
       item.selected = directory == url; item.expanded = expanded.contains(url.path)
       if url.isFileURL { item.onExpand = { [weak self] in self?.toggleFolder(url) } }
       item.onOpenTab = { [weak self] in self?.openTab(at: url) }
-      item.onContext = { [weak self] event in self?.sidebarMenu(url, event: event) }
+      item.onContext = { [weak self] event in self?.sidebarMenu(url, canEject: canEject, event: event) }
+      if canEject { item.onEject = { [weak self] in self?.ejectVolume(url) } }
+      item.ejectEnabled = !busy && !ejectingVolumes.contains(url.path)
       item.placePath = pinned ? url.path : nil
       item.onDragUpdate = { [weak self, weak item] info, localY in self?.sidebarDrag(info, target: url, row: item, y: localY, pinned: pinned) ?? [] }
       item.onDrop = { [weak self, weak item] info, localY in self?.sidebarDrop(info, target: url, row: item, y: localY, pinned: pinned) ?? false }
@@ -577,7 +581,9 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     row(NL("此电脑"), URL(string: "explorer://computer")!, "computer")
     sidebarRows.last?.1.expanded = true; sidebarRows.last?.1.onExpand = nil
     row((try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeNameKey]).volumeName) ?? "Macintosh HD", URL(fileURLWithPath: "/"), "drive", level: 1)
-    for volume in FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: nil, options: [.skipHiddenVolumes]) ?? [] where volume.path.hasPrefix("/Volumes/") && !providerCloudDrives.contains(where: { $0.url == volume.resolvingSymlinksInPath().standardizedFileURL }) { row(volume.lastPathComponent, volume, "drive", level: 1) }
+    for volume in (try? NativeVolumes.list()) ?? [] where volume.path.hasPrefix("/Volumes/") && !providerCloudDrives.contains(where: { $0.url == volume.url.resolvingSymlinksInPath().standardizedFileURL }) {
+      row(volume.name, volume.url, "drive", level: 1, canEject: volume.canEject)
+    }
     if let cloudDrive { row("iCloud Drive", cloudDrive, "cloud") }
     for drive in providerCloudDrives { row(drive.name, drive.url, "cloud") }
     row(NL("回收站"), URL(string: "explorer://trash")!, "trash")
@@ -586,7 +592,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     placeMarker.identifier = NSUserInterfaceItemIdentifier("marker"); placeMarker.isHidden = true; sidebarDocument.addSubview(placeMarker)
     sidebarScroll.contentView.scroll(to: NSPoint(x: 0, y: min(scroll.y, max(0, y + 8 - sidebarScroll.contentSize.height)))); sidebarScroll.reflectScrolledClipView(sidebarScroll.contentView)
   }
-  private func sidebarMenu(_ url: URL, event: NSEvent) {
+  private func sidebarMenu(_ url: URL, canEject: Bool, event: NSEvent) {
     guard let window = view.window else { return }
     var items = [ExplorerMenuItem(title: NL("在新标签页中打开"), icon: "plus", action: { [weak self] in self?.openTab(at: url) })]
     if url.isFileURL {
@@ -595,8 +601,8 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
         items.append(ExplorerMenuItem(title: pinnedPaths.contains(url.path) ? NL("从快速访问取消固定") : NL("固定到快速访问"), icon: "pin", action: { [weak self] in self?.togglePin(url) }))
       }
     }
-    if url.path.hasPrefix("/Volumes/"), (try? url.resourceValues(forKeys: [.volumeIsEjectableKey]).volumeIsEjectable) == true {
-      items.append(ExplorerMenuItem(title: NL("推出"), icon: "eject", enabled: !busy, divider: true, action: { [weak self] in self?.ejectVolume(url) }))
+    if canEject {
+      items.append(ExplorerMenuItem(title: NL("推出"), icon: "eject", enabled: !busy && !ejectingVolumes.contains(url.path), divider: true, action: { [weak self] in self?.ejectVolume(url) }))
     }
     ExplorerMenu.show(items, at: window.convertPoint(toScreen: event.locationInWindow), owner: window)
   }
@@ -759,17 +765,21 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     cancelInlineRename()
     ExplorerMenu.dismiss(); generation += 1; queryGeneration += 1; loadTask?.cancel(); queryTask?.cancel(); searchTask?.cancel()
     vcsStatus = nil; vcsGeneration += 1; vcsTask?.cancel(); vcsPendingRefresh = nil
-    let token = generation, target = directory; startedAt = Date(); loading = true; lastError = nil; snapshot = nil; entries = []
+    let token = generation, target = directory
+    let keepContents = (target.isFileURL || viewingTrash) && snapshot.map { sameLocation($0.directory, target) } == true
+    startedAt = Date(); loading = true; lastError = nil
+    if !keepContents { snapshot = nil; entries = [] }
     addressBar.homeDirectory = home
     addressBar.setDirectory(target, title: target.isFileURL ? nil : locationLabel(target)); addressBar.showHidden = showHidden; search.placeholderString = NL("在{0}中搜索", locationLabel(target)); search.isEnabled = target.host != "airdrop"; searchBox.update()
     backButton.isEnabled = tabs[activeTab].index > 0; forwardButton.isEnabled = tabs[activeTab].index + 1 < tabs[activeTab].history.count; upButton.isEnabled = target.path != "/"
-    rebuildTabs(); for (url, row) in sidebarRows { row.selected = url == target }; render()
+    rebuildTabs(); for (url, row) in sidebarRows { row.selected = url == target }
+    if keepContents { updateStatus() } else { render() }
     if target.absoluteString == "explorer://trash" || viewingTrash {
       let store = trashStore
       let task = Task.detached(priority: .userInitiated) { try store.list(target.scheme == "explorer" ? nil : target) }; loadTask = task
       Task { @MainActor [weak self] in
         do { let result = try await task.value; guard let self, self.generation == token else { return }; self.snapshot = result; self.recompute() }
-        catch { guard let self, self.generation == token else { return }; self.loading = false; self.lastError = error.localizedDescription; self.render() }
+        catch { guard let self, self.generation == token else { return }; self.loading = false; self.snapshot = nil; self.entries = []; self.lastError = error.localizedDescription; self.render() }
       }
       return
     }
@@ -780,7 +790,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     let task = Task.detached(priority: .userInitiated) { try DirectoryReader.read(target) }; loadTask = task
     Task { @MainActor [weak self] in
       do { let result = try await task.value; guard let self, self.generation == token else { return }; self.snapshot = result; self.recompute(); self.refreshVCS() }
-      catch { guard let self, self.generation == token else { return }; self.loading = false; self.lastError = self.errorMessage(error); self.render() }
+      catch { guard let self, self.generation == token else { return }; self.loading = false; self.snapshot = nil; self.entries = []; self.lastError = self.errorMessage(error); self.render() }
     }
   }
   private func scheduleAutomaticRefresh() {
@@ -877,6 +887,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   }
   private func render() {
     if renamingEntry != nil { updateStatus(); return }
+    let loading = showsLoadingPlaceholder
     readClipboard()
     sizeSlider.doubleValue = Double(iconSize); sizeValue.stringValue = "\(Int(iconSize))"
     syncingSelection = true
@@ -907,13 +918,14 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     errorLabel.stringValue = lastError ?? (searchActive ? NL("“{0}” 的搜索结果 · {1} 个匹配项目", search.stringValue, entries.count) : "")
     errorLabel.toolTip = lastError
     updateStatus(); updatePane(); view.needsLayout = true
-    if !loading, let pendingRename, entries.contains(where: { $0.id == pendingRename }) {
+    if !self.loading, let pendingRename, entries.contains(where: { $0.id == pendingRename }) {
       self.pendingRename = nil
       DispatchQueue.main.async { [weak self] in guard let self, self.selectedPaths == [pendingRename] else { return }; self.renameSelected() }
     }
     view.window?.title = "\(locationLabel(directory)) — Mac Explorer"
   }
   private func updateStatus() {
+    for (url, row) in sidebarRows { row.ejectEnabled = !busy && !ejectingVolumes.contains(url.path) }
     let chosen = selectedEntries(), total = chosen.filter { !$0.isDirectory }.reduce(Int64(0)) { $0 + $1.size }
     status.stringValue = loading ? NL("正在读取…") : NL("{0} 个项目", entries.count) + (chosen.isEmpty ? "" : NL("     已选择 {0} 个项目", chosen.count)) + (total > 0 ? "     \(ExplorerFormat.size(total))" : "") + (message.isEmpty ? (showHidden ? NL("     显示隐藏的项目") : "") : "     \(message)")
     commands["cut"]?.isEnabled = !chosen.isEmpty && !busy && !viewingTrash; commands["copy"]?.isEnabled = !chosen.isEmpty && !busy
@@ -1074,7 +1086,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   }
   func tableViewSelectionDidChange(_ notification: Notification) { guard !syncingSelection, mode == .details else { return }; selectedPaths = Set(table.selectedRowIndexes.compactMap { entryIndex(at: $0).map { entries[$0].id } }); updateStatus(); updatePane() }
   func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) { guard !syncingSortDescriptors, let descriptor = tableView.sortDescriptors.first, let key = descriptor.key, let order = EntrySort(rawValue: key) else { return }; sort = order; ascending = descriptor.ascending; saveView(group: "sort"); recompute() }
-  func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int { mode == .details || loading ? 0 : displayRows.count }
+  func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int { mode == .details || showsLoadingPlaceholder ? 0 : displayRows.count }
   func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
     if let group = groupIndex(at: indexPath.item) {
       let item = collection.makeItem(withIdentifier: .init("group"), for: indexPath) as! ExplorerGroupItem
@@ -1769,10 +1781,19 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     }
   }
   private func ejectVolume(_ url: URL) {
-    guard !busy else { return }
+    guard !busy, !stopped, ejectingVolumes.insert(url.path).inserted else { return }
+    updateStatus()
     Task { @MainActor [weak self] in
-      do { _ = try await Task.detached { try NativeVolumes.eject(url) }.value; self?.rebuildSidebar(); if self?.directory == url { self?.navigate(to: URL(string: "explorer://computer")!) } }
-      catch { self?.operationError = error.localizedDescription; self?.render() }
+      do {
+        _ = try await Task.detached { try NativeVolumes.eject(url) }.value
+        guard let self, !self.stopped else { return }
+        self.ejectingVolumes.remove(url.path); self.rebuildSidebar()
+        if self.directory.isFileURL && (self.directory.path == url.path || self.directory.path.hasPrefix(url.path + "/")) { self.navigate(to: URL(string: "explorer://computer")!) }
+        else if self.directory.scheme == "explorer", ["computer", "network"].contains(self.directory.host ?? "") { self.reload() }
+      } catch {
+        guard let self, !self.stopped else { return }
+        self.ejectingVolumes.remove(url.path); self.operationError = error.localizedDescription; self.render()
+      }
     }
   }
   private func showProperties() {
@@ -1981,8 +2002,13 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     guard !urls.isEmpty, !operation.isEmpty else { return false }
     runTransferOperation { control in FileActions.transfer(urls, to: target, move: operation == .move, control: control) }; return true
   }
-  func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) { reload() }
-  func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, dragOperation operation: NSDragOperation) { reload() }
+  func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) { finishedDragging(operation) }
+  func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, dragOperation operation: NSDragOperation) { finishedDragging(operation) }
+  func finishedDragging(_ operation: NSDragOperation) {
+    guard !operation.isEmpty else { return }
+    if directory.isFileURL && !viewingTrash && !searchActive { scheduleAutomaticRefresh() }
+    else { reload() }
+  }
 
   private func errorMessage(_ error: Error, at context: URL? = nil) -> String {
     let failure = NativeFileFailure.describe(error, at: context ?? directory, networkLocation: fileErrorNetworkLocation)
@@ -2142,12 +2168,36 @@ extension BrowserController {
 }
 
 
+struct ExternalOpenGroup {
+  let directory: URL
+  var selection: [URL] = []
+}
+
 extension BrowserController {
-  func openExternal(_ url: URL) {
-    guard url.isFileURL, !url.path.contains("\0"), let values = try? url.resourceValues(forKeys: [.isDirectoryKey]) else { return }
-    if values.isDirectory == true { navigate(to: url) }
-    else { navigate(to: url.deletingLastPathComponent()); selectedPaths = [url.path] }
+  // Files sharing a folder stay together in one tab; a folder opens on its own.
+  // Packages such as .app bundles behave as files: reveals must not enter them.
+  static func externalGroups(_ urls: [URL]) -> (groups: [ExternalOpenGroup], unavailable: Int) {
+    var groups: [ExternalOpenGroup] = [], unavailable = 0
+    for url in urls {
+      guard url.isFileURL, !url.path.contains("\0"), let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey]) else { unavailable += 1; continue }
+      if values.isDirectory == true && values.isPackage != true { groups.append(ExternalOpenGroup(directory: url)); continue }
+      let parent = url.deletingLastPathComponent()
+      if let index = groups.firstIndex(where: { !$0.selection.isEmpty && $0.directory.path == parent.path }) { groups[index].selection.append(url) }
+      else { groups.append(ExternalOpenGroup(directory: parent, selection: [url])) }
+    }
+    return (groups, unavailable)
   }
+  func openExternal(_ group: ExternalOpenGroup) {
+    navigate(to: group.directory)
+    guard !group.selection.isEmpty else { return }
+    // Replaces the state navigate prepared, which would otherwise reveal the previous folder.
+    let paths = group.selection.map { directory.appendingPathComponent($0.lastPathComponent).path }
+    var state = pendingLocationState ?? BrowserLocationState()
+    state.selection = Set(paths); state.revealPath = paths[0]
+    tabs[activeTab].locationStates[tabs[activeTab].index] = state
+    prepareLocationState(state)
+  }
+  func reportUnavailableExternalItems() { operationError = NL("项目不存在或无法访问"); render() }
 }
 
 
