@@ -39,11 +39,20 @@ enum StartupCheck {
       guard NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty else {
         throw StartupFailure(description: "Close the native prototype before the startup check; existing instances are not terminated")
       }
+      let executableFixture = FileManager.default.temporaryDirectory.appendingPathComponent("native-executable-reveal-" + UUID().uuidString)
+      try FileManager.default.createDirectory(at: executableFixture, withIntermediateDirectories: true)
+      defer { try? FileManager.default.removeItem(at: executableFixture) }
+      let executable = executableFixture.appendingPathComponent("Windows fixture.exe")
+      let contents = Data("MZ\0Windows executable reveal fixture".utf8)
+      try contents.write(to: executable)
       var checks: [[String: Any]] = []
-      for (index, arguments) in [[], ["--path", CommandLine.arguments[2]], []].enumerated() {
+      let launches: [(arguments: [String], documents: [String])] = [
+        ([], []), (["--path", CommandLine.arguments[2]], []), ([], []), ([], [executable.path]),
+      ]
+      for (index, launch) in launches.enumerated() {
         let launcher = Process()
         launcher.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        launcher.arguments = ["-n", appURL.path] + (arguments.isEmpty ? [] : ["--args"] + arguments)
+        launcher.arguments = ["-n", "-a", appURL.path] + launch.documents + (launch.arguments.isEmpty ? [] : ["--args"] + launch.arguments)
         try launcher.run()
         launcher.waitUntilExit()
         guard launcher.terminationStatus == 0 else { throw StartupFailure(description: "open failed") }
@@ -75,7 +84,8 @@ enum StartupCheck {
         }
         checks.append([
           "attempt": index + 1,
-          "arguments": arguments,
+          "arguments": launch.arguments,
+          "documents": launch.documents,
           "pid": app.processIdentifier,
           "windowVisibleForSeconds": 3,
           "windowBounds": visibleWindow(for: app)?[kCGWindowBounds as String] ?? [:],
@@ -84,6 +94,7 @@ enum StartupCheck {
         try waitUntil("Application did not exit normally") { app.isTerminated }
         completed = true
       }
+      guard try Data(contentsOf: executable) == contents else { throw StartupFailure(description: "Executable reveal changed its source file") }
       let data = try JSONSerialization.data(withJSONObject: ["passed": true, "launches": checks], options: [.prettyPrinted, .sortedKeys])
       print(String(decoding: data, as: UTF8.self))
     } catch {
