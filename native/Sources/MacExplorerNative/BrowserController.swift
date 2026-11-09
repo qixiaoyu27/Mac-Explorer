@@ -72,7 +72,6 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   var home: URL
   let defaults: UserDefaults
   private var generation = 0, queryGeneration = 0
-  private var addressSubmission = 0
   private var startedAt = Date()
   private var loadTask: Task<DirectorySnapshot, Error>?
   private var queryTask: Task<[FileEntry], Never>?
@@ -147,8 +146,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   let content = FilePaneSurface()
   var fileScroll: NSScrollView { content.scroll }
   lazy var specialView = ExplorerSpecialView(defaults: defaults)
-  let addressBar = ExplorerAddressBar(), searchBox = ExplorerSearchBox()
-  var address: NSTextField { addressBar.field }
+  let addressBar = AddressBand(), searchBox = ExplorerSearchBox()
   var search: NSTextField { searchBox.field }
   let status = label("", size: 12, color: ExplorerPalette.secondary)
   let emptyLabel = label("", size: 15, color: ExplorerPalette.secondary)
@@ -224,9 +222,17 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     upButton.onPress = { [weak self] in self?.up() }; refreshButton.onPress = { [weak self] in IconLoader.shared.clear(); self?.reload() }
     for (control, tip) in [(backButton, NL("后退 ⌘[")), (forwardButton, NL("前进 ⌘]")), (upButton, NL("向上一级 ⌘↑")), (refreshButton, NL("刷新 ⌘R"))] { control.toolTip = tip }
     addressBar.recentPaths = defaults.stringArray(forKey: "typedPaths") ?? []
-    addressBar.onNavigate = { [weak self] in self?.navigate(to: $0) }; addressBar.onSubmit = { [weak self] in self?.goAddress($0) }
+    addressBar.onHistoryChanged = { [weak self] in self?.defaults.set($0, forKey: "typedPaths") }
+    addressBar.onAddressDestination = { [weak self] in try self?.openAddressDestination($0) }
     addressBar.labelForPath = { [weak self] in self?.locationLabel($0) ?? $0.lastPathComponent }
-    addressBar.onCopyAddress = { [weak self] value in self?.filePasteboard.clearContents(); self?.filePasteboard.setString(value, forType: .string) }
+    addressBar.onCopyAddress = { [weak self] location, asItem in
+      guard let self else { return }
+      let item = NSPasteboardItem()
+      item.setString(location.isFileURL ? location.path : self.locationLabel(location), forType: .string)
+      if asItem, location.isFileURL { item.setString(location.absoluteString, forType: .fileURL) }
+      self.filePasteboard.clearContents()
+      self.filePasteboard.writeObjects([item])
+    }
     addressBar.onError = { [weak self] error in self?.lastError = self?.errorMessage(error); self?.render() }
     addressBar.onFileDragValidate = { [weak self] info, target in self?.dropOperation(info, target: target, fromTab: true) ?? [] }
     addressBar.onFileDrop = { [weak self] info, target in self?.acceptFiles(info, at: target, fromTab: true) ?? false }
@@ -800,7 +806,8 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     loadingReplacesContents = !keepContents
     if !keepContents { snapshot = nil; entries = [] }
     addressBar.homeDirectory = home
-    addressBar.setDirectory(target, title: target.isFileURL ? nil : locationLabel(target)); addressBar.showHidden = showHidden; search.placeholderString = NL("在{0}中搜索", locationLabel(target)); search.isEnabled = target.host != "airdrop"; searchBox.update()
+    addressBar.SetNavigationState(AddressNavigationState(location: target, title: target.isFileURL ? nil : locationLabel(target), tab: tabs[activeTab].id))
+    addressBar.showHidden = showHidden; search.placeholderString = NL("在{0}中搜索", locationLabel(target)); search.isEnabled = target.host != "airdrop"; searchBox.update()
     backButton.isEnabled = tabs[activeTab].index > 0; forwardButton.isEnabled = tabs[activeTab].index + 1 < tabs[activeTab].history.count; upButton.isEnabled = target.path != "/"
     rebuildTabs(); for (url, row) in sidebarRows { row.selected = url == target }
     if keepContents { updateStatus() } else { render() }
@@ -885,6 +892,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   func stopObserving() {
     guard !stopped else { return }; stopped = true; generation += 1; queryGeneration += 1
     selectionManager.endTracking()
+    addressBar.RevertEditChanges()
     directoryWatcher.stop(); automaticRead?.cancel(); reconnectTask?.cancel(); reconnectTask = nil; refreshWork?.cancel(); refreshWork = nil
     loadTask?.cancel(); queryTask?.cancel(); searchTask?.cancel()
     vcsGeneration += 1; vcsTask?.cancel(); vcsPendingRefresh = nil
@@ -906,6 +914,11 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     }
     for column in table.tableColumns { (column.headerCell as? ExplorerHeaderCell)?.ascending = column.identifier.rawValue == sort.rawValue ? ascending : nil }; table.headerView?.needsDisplay = true
     guard let snapshot else { return }; queryGeneration += 1; queryTask?.cancel()
+    if directory.isFileURL && !searchActive && sameLocation(snapshot.directory, directory) {
+      addressBar.breadcrumbBar.SetCurrentFolderContainsSubFolders(snapshot.entries.contains {
+        $0.isDirectory && !$0.isPackage && (showHidden || !$0.isHidden)
+      })
+    }
     let token = queryGeneration, navigation = generation, hidden = showHidden, query = searchActive ? "" : search.stringValue, order = sort, direction = ascending
     let task = Task.detached(priority: .userInitiated) { EntryQuery.apply(snapshot.entries, showHidden: hidden, query: query, sort: order, ascending: direction) }; queryTask = task
     Task { @MainActor [weak self] in
@@ -1364,25 +1377,21 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   @objc func back() { travelHistory(-1) }
   @objc func forward() { travelHistory(1) }
   @objc func up() { navigate(to: directory.deletingLastPathComponent()) }
-  @objc func focusAddress() { addressBar.beginEditing() }
+  @objc func focusAddress() { addressBar._SetFocusAndEditMode() }
   @objc func focusSearch() { view.window?.makeFirstResponder(search); search.selectText(nil) }
-  @objc func goAddress() { goAddress(address.stringValue) }
-  private func goAddress(_ value: String) {
-    let input = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !input.isEmpty, !input.contains("\0") else { return }
-    addressSubmission += 1; let request = addressSubmission
-    if input.lowercased().hasPrefix("smb:") { connectServer(input); return }
-    let base = directory, tab = tabs[activeTab].id, home = self.home
-    Task { @MainActor [weak self] in
-      do {
-        let metadata = try await Task.detached { try NativeAddressPath.metadata(NativeAddressPath.resolve(input, current: base, home: home)) }.value
-        guard let self, self.addressSubmission == request, self.tabs[self.activeTab].id == tab, self.directory == base else { return }
-        if metadata.isFolder { self.navigate(to: metadata.url) }
-        else if NativeArchives.isArchive(metadata.url), let window = self.view.window { NativeArchiveWindow.present(archive: metadata.url, parent: window) { [weak self] in self?.acceptExternalResult($0) } }
-        else if !NSWorkspace.shared.open(metadata.url) { throw NativeNetwork.failure("无法打开此项目。") }
-        self.addressBar.recentPaths = Array(([metadata.url.path] + self.addressBar.recentPaths.filter { $0 != metadata.url.path }).prefix(25))
-        self.defaults.set(self.addressBar.recentPaths, forKey: "typedPaths")
-      } catch { guard let self, self.addressSubmission == request, self.tabs[self.activeTab].id == tab, self.directory == base else { return }; self.lastError = self.errorMessage(error); self.render() }
+  private func openAddressDestination(_ destination: AddressDestination) throws {
+    switch destination {
+    case .location(let url):
+      navigate(to: url)
+    case .mountedShare(let url, let address):
+      rememberServer(address)
+      navigate(to: url)
+    case .item(let url):
+      if NativeArchives.isArchive(url), let window = view.window {
+        NativeArchiveWindow.present(archive: url, parent: window) { [weak self] in self?.acceptExternalResult($0) }
+      } else if !NSWorkspace.shared.open(url) {
+        throw NativeNetwork.failure("无法打开此项目。")
+      }
     }
   }
 
@@ -2130,6 +2139,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     if let action = fixed[key] { action(); return nil }
     let editing = view.window?.firstResponder is NSTextView
     guard let action = ExplorerShortcuts.match(event, overrides: shortcutOverrides) else {
+      if key == "F4" { addressBar.ShowAddressHistory(); return nil }
       if key == "Shift+F10", showKeyboardContext() { return nil }
       if !editing, ExplorerShortcuts.actions.contains(where: { shortcutOverrides[$0.id] != nil && $0.defaults.contains(key) }) { return nil }
       return event

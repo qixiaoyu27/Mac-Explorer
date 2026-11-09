@@ -42,6 +42,11 @@ enum NativeSmoke {
         try write(["passed": true, "checks": checks], to: report)
         NSApp.terminate(nil); return
       }
+      if ProcessInfo.processInfo.arguments.contains("--smoke-address-tabs") {
+        checks += try await NativeAddressTabChecks.run(source: browser)
+        try write(["passed": true, "checks": checks], to: report)
+        NSApp.terminate(nil); return
+      }
       if ProcessInfo.processInfo.arguments.contains("--smoke-context-menu-input") {
         try await until { !browser.loading && browser.entries.count >= 3 }
         checks += try NativeSelectionChecks.runContextMenuInput(browser: browser, window: window)
@@ -256,7 +261,7 @@ enum NativeSmoke {
       window.setContentSize(NSSize(width: 920, height: 540))
       try await Task.sleep(nanoseconds: 100_000_000)
       window.contentView?.layoutSubtreeIfNeeded()
-      try expect(browser.content.bounds.height > 300 && browser.address.bounds.width > 250, "compact window preserves navigation and usable file area")
+      try expect(browser.content.bounds.height > 300 && browser.addressBar.editBox.bounds.width > 250, "compact window preserves navigation and usable file area")
       try capture(window, at: report.deletingLastPathComponent().appendingPathComponent("native-compact.png"))
       NSApp.appearance = nil
       checks += try await NativeParityChecks.run(source: browser, output: report.deletingLastPathComponent())
