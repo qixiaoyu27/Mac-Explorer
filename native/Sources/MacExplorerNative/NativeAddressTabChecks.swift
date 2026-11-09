@@ -161,15 +161,35 @@ enum NativeAddressTabChecks {
     try check(navigated == nil, "Switching tabs cancels pending address navigation even at the same folder")
 
     var selected = 0, dropped = 0
-    let tab = ExplorerTabView(title: "fixture", active: false, onSelect: { selected += 1 }, onClose: {})
-    tab.frame = NSRect(x: 24, y: 12, width: 214, height: 36); surface.addSubview(tab)
+    let tab = ExplorerTabView()
+    tab.header = "fixture"
+    tab.onSelect = { selected += 1 }
+    tab.setFrameOrigin(NSPoint(x: 24, y: 12))
+    surface.addSubview(tab)
+    surface.layoutSubtreeIfNeeded()
+    let leftFoot = NSPoint(x: 2.5, y: tab.bounds.maxY - 0.5)
+    let rightFoot = NSPoint(x: tab.bounds.maxX - leftFoot.x, y: leftFoot.y)
+    let shape = tab.tabViewTemplateSettings.tabGeometry
+    try check(shape.contains(leftFoot) && shape.contains(rightFoot) && !shape.contains(NSPoint(x: leftFoot.x, y: 20)),
+              "The selected tab geometry flares only at the two bottom corners")
+    try check(tab.hitTest(tab.convert(leftFoot, to: surface)) == nil && tab.hitTest(tab.convert(rightFoot, to: surface)) == nil,
+              "The flared corners do not extend the tab hit target")
+    guard let closeButton = tab.subviews.compactMap({ $0 as? ExplorerButton }).first else { throw failure("Missing tab close button") }
+    var closeRequests = 0
+    tab.onClose = { closeRequests += 1 }
+    tab.isClosable = false
+    closeButton.performClick(nil)
+    try check(closeButton.isHidden && closeRequests == 0, "A nonclosable tab hides its close button and rejects its action")
+    tab.isClosable = true
+    closeButton.performClick(nil)
+    try check(!closeButton.isHidden && closeRequests == 1, "The close button sends one request to the tab controller")
     tab.onDragValidate = { info in info.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) ? .move : [] }
     tab.onDrop = { _ in dropped += 1; return true }
     let drag = AddressTabDrag(view: tab, board: board)
     try check(tab.draggingEntered(drag) == .move, "File drags are accepted by folder tabs")
     try await Task.sleep(nanoseconds: 100_000_000); tab.draggingExited(drag); try await Task.sleep(nanoseconds: 550_000_000)
     try check(selected == 0, "Leaving a tab cancels its pending hover switch")
-    _ = tab.draggingEntered(drag); try await until { selected == 1 }; tab.selected = true
+    _ = tab.draggingEntered(drag); try await until { selected == 1 }; tab.isSelected = true
     try check(true, "Holding a file drag over an inactive tab selects it after 600ms")
     try check(tab.performDragOperation(drag) && dropped == 1, "Tab drops use the configured file-drop callback")
     board.clearContents(); board.setString("text only", forType: .string)
@@ -206,7 +226,29 @@ enum NativeAddressTabChecks {
     try await until { fm.fileExists(atPath: docs.appendingPathComponent("breadcrumb-source.txt").path) && !fm.fileExists(atPath: breadcrumbSource.path) }
     try check(try String(contentsOf: docs.appendingPathComponent("breadcrumb-source.txt"), encoding: .utf8) == "breadcrumb transfer", "Address breadcrumb drops move files into their target folder")
     browser.openTab(at: downloads); try await until { !browser.loading && browser.directory == downloads }
-    guard let first = browser.tabsDocument.subviews.compactMap({ $0 as? ExplorerTabView }).first else { throw failure("No Browser folder tab") }
+    browser.openTab(at: apps); try await until { !browser.loading && browser.directory == apps }
+    let tabs = browser.tabsDocument.subviews.compactMap { $0 as? ExplorerTabView }
+    guard tabs.count == 3 else { throw failure("Expected three browser folder tabs") }
+    let first = tabs[0], second = tabs[1], third = tabs[2]
+    let document = browser.tabsDocument
+    let seam = second.frame.midX - ExplorerTabView.bodyWidth / 2
+    let beforeSeam = document.convert(NSPoint(x: seam - 0.5, y: 18), to: document.superview)
+    let afterSeam = document.convert(NSPoint(x: seam + 0.5, y: 18), to: document.superview)
+    try check(document.hitTest(beforeSeam) === first && document.hitTest(afterSeam) === second,
+              "Adjacent tabs meet without a gap or an overlapping hit target")
+    try check(!second.showsTrailingSeparator && third.layer?.zPosition == 1,
+              "The active tab paints above its neighbors and hides the separator at its leading edge")
+    let hover = NSEvent.mouseEvent(with: .mouseMoved, location: .zero, modifierFlags: [], timestamp: 0,
+                                   windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0)!
+    try check(first.showsTrailingSeparator, "Idle inactive tabs show their shared separator")
+    first.mouseEntered(with: hover)
+    try check(!first.showsTrailingSeparator, "Hovering the left tab hides the shared separator")
+    first.mouseExited(with: hover)
+    second.mouseEntered(with: hover)
+    try check(!first.showsTrailingSeparator, "Hovering the right tab hides the same shared separator")
+    second.mouseExited(with: hover)
+    try check(first.showsTrailingSeparator && !second.showsTrailingSeparator,
+              "Leaving either tab restores the shared separator and respects the active tab")
     board.clearContents(); board.writeObjects([file as NSURL])
     try check(!first.draggingEntered(AddressTabDrag(view: first, board: board)).isEmpty, "Browser folder tabs expose the existing file-drop validation")
     try await until { browser.activeTab == 0 && !browser.loading }

@@ -54,7 +54,10 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     get { Set(selectedEntries().map(\.id)) }
     set { selectionManager.replaceSelection(paths: newValue) }
   }
-  var showHidden = false, ascending = true, compact = false, checkboxes = false, extensions = true, navigationPane = true
+  var showHidden = false, ascending = true, compact = false, extensions = true, navigationPane = true
+  var checkboxes = false {
+    didSet { if oldValue != checkboxes { updateNameHeader() } }
+  }
   var groupMode: EntryGroupMode = .none
   var groupNewestFirst = true, groupFoldersFirst = true
   private(set) var groups: [EntryGroup] = []
@@ -130,7 +133,8 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   private var preferencesWork: DispatchWorkItem?
   private var preferenceSnapshot: NSDictionary = [:]
   private var appliedFontSize: CGFloat = 13
-  private var preferredRowHeight: CGFloat { max(compact ? 28 : 36, appliedFontSize + (compact ? 15 : 19)) }
+  private var preferredRowHeight: CGFloat { max(compact ? 28 : 32, appliedFontSize + (compact ? 15 : 19)) }
+  private var detailHeaderHeight: CGFloat { max(32, ExplorerTypography.lineHeight + 8) }
   private(set) var inputNavigation: NativeInputNavigation?
   private static let placesChanged = Notification.Name("NativeExplorerPlacesChanged")
   private var stopped = false
@@ -153,7 +157,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   let spinner = NSProgressIndicator()
   let loadingView = ExplorerLoadingView()
   let tabsBar = ExplorerTabBar(), navigationBar = SurfaceView(), commandBar = SurfaceView(), footer = SurfaceView(), sidebar = SurfaceView(), pane = SurfaceView()
-  let tabsDocument = SurfaceView(), tabsScroll = NSScrollView(), sidebarScroll = NSScrollView(), sidebarDocument = SurfaceView()
+  let tabsDocument = SurfaceView(), tabsScroll = NSScrollView(), sidebarScroll = ExplorerSidebarScrollView(), sidebarDocument = SurfaceView()
   let errorBar = SurfaceView(), errorLabel = label("", size: 12)
   let errorClose = ExplorerButton(icon: "close"), exitSearch = ExplorerButton(title: NL("退出搜索"))
   let privacySettings = ExplorerButton(title: NL("前往设置"))
@@ -168,11 +172,11 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   let sizeLabel = label(NL("图标大小"), size: 11), sizeValue = label("64", size: 11)
   let sizeSlider = NSSlider(value: 64, minValue: 32, maxValue: 128, target: nil, action: nil)
   private var commands: [String: ExplorerButton] = [:]
-  private let commandTools = SurfaceView(), commandToolsScroll = NSScrollView()
+  private let commandTools = SurfaceView(), commandToolsScroll = ExplorerScrollView()
   private let firstDivider = SurfaceView(), secondDivider = SurfaceView()
   private let byteFormatter = ByteCountFormatter(), dateFormatter = DateFormatter()
   private var detailsPreview: QLPreviewView?
-  private let paneScroll = NSScrollView(), paneBody = SurfaceView()
+  private let paneScroll = ExplorerScrollView(), paneBody = SurfaceView()
   private var paneEntry: FileEntry?
   private var paneReadEntry: FileEntry?
   private var paneReadTask: Task<NativeFilePreview, Error>?
@@ -217,6 +221,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     tabsBar.addSubview(tabsScroll); tabsBar.addSubview(addTabButton)
     addTabButton.onPress = { [weak self] in self?.newTab() }; addTabButton.toolTip = NL("新建标签页 ⌘T")
     for item in [backButton, forwardButton, upButton, refreshButton] { navigationBar.addSubview(item) }
+    refreshButton.iconDimension = 14
     navigationBar.addSubview(addressBar); navigationBar.addSubview(searchBox)
     backButton.onPress = { [weak self] in self?.back() }; forwardButton.onPress = { [weak self] in self?.forward() }
     upButton.onPress = { [weak self] in self?.up() }; refreshButton.onPress = { [weak self] in IconLoader.shared.clear(); self?.reload() }
@@ -331,7 +336,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     ExplorerTypography.resizeControls(in: view, by: delta)
     if let window = view.window { ExplorerDialogs.refreshTypography(in: window, by: delta) }
     table.rowHeight = preferredRowHeight
-    table.headerView?.frame.size.height = max(36, ExplorerTypography.lineHeight + 8)
+    table.headerView?.frame.size.height = detailHeaderHeight
     collectionLayout.invalidateLayout(); view.needsLayout = true
   }
 
@@ -387,16 +392,20 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     table.allowsMultipleSelection = true; table.backgroundColor = ExplorerPalette.surface
     table.columnAutoresizingStyle = .noColumnAutoresizing; table.target = self; table.doubleAction = #selector(openSelected)
     table.setAccessibilityLabel(NL("文件列表"))
-    let header = ExplorerTableHeaderView(frame: NSRect(x: 0, y: 0, width: 900, height: 41))
+    let header = ExplorerTableHeaderView(frame: NSRect(x: 0, y: 0, width: 900, height: detailHeaderHeight))
     header.onMenu = { [weak self] event in
       guard let self, let window = self.view.window else { return }
       ExplorerMenu.show(self.columnMenu(), at: window.convertPoint(toScreen: event.locationInWindow), owner: window)
     }
     table.headerView = header; table.allowsColumnReordering = true; table.allowsColumnResizing = true
     for (id, title, width) in [("name", NL("名称"), 450.0), ("modified", NL("修改日期"), 165.0), ("created", NL("创建日期"), 165.0), ("kind", NL("类型"), 132.0), ("size", NL("大小"), 100.0)] {
-      let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id)); column.headerCell = ExplorerHeaderCell(textCell: title)
+      let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
+      let headerCell = ExplorerHeaderCell(textCell: title)
+      headerCell.alignment = id == "size" ? .right : .left
+      column.headerCell = headerCell
       column.width = width; column.minWidth = DetailColumns.minimumWidth(id); column.maxWidth = 2000; column.sortDescriptorPrototype = NSSortDescriptor(key: id, ascending: true); table.addTableColumn(column)
     }
+    updateNameHeader()
     collection.collectionViewLayout = collectionLayout; collection.isSelectable = true; collection.allowsMultipleSelection = true
     collection.backgroundColors = [ExplorerPalette.surface]; collection.dataSource = self; collection.delegate = self
     collection.register(ExplorerGroupItem.self, forItemWithIdentifier: NSUserInterfaceItemIdentifier("group"))
@@ -410,109 +419,162 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     table.trashSelection = { [weak self] in self?.trashSelected() }; collection.trashSelection = table.trashSelection
   }
 
+  private func updateNameHeader() {
+    guard let header = table.tableColumn(withIdentifier: .init("name"))?.headerCell as? ExplorerHeaderCell else { return }
+    header.textLeading = NameCell.textLeading(checkboxes: checkboxes)
+    table.headerView?.needsDisplay = true
+  }
+
   func layoutChrome() {
     let width = view.bounds.width, height = view.bounds.height
     let sidebarWidth: CGFloat = navigationPane ? (width <= 900 ? 175 : width <= 1100 ? 185 : 208) : 0
     let paneWidth: CGFloat = paneMode.isEmpty ? 0 : (width <= 900 ? 242 : 276)
-    tabsBar.frame = NSRect(x: 0, y: 0, width: width, height: 48)
-    navigationBar.frame = NSRect(x: 0, y: 48, width: width, height: 61)
-    commandBar.frame = NSRect(x: 0, y: 109, width: width, height: 57)
-    let footerHeight = max(30, ExplorerTypography.lineHeight + 14)
+    let tabSize = ExplorerTabView.size
+    let tabTopInset: CGFloat = 8
+    tabsBar.frame = NSRect(x: 0, y: 0, width: width, height: tabTopInset + tabSize.height)
+    navigationBar.frame = NSRect(x: 0, y: tabsBar.frame.maxY, width: width, height: 48)
+    commandBar.frame = NSRect(x: 0, y: navigationBar.frame.maxY, width: width, height: 48)
+    let bodyTop = commandBar.frame.maxY
+    let footerHeight = max(25, ExplorerTypography.lineHeight + 7)
     footer.frame = NSRect(x: 0, y: height - footerHeight, width: width, height: footerHeight)
-    let bodyHeight = max(0, height - 166 - footerHeight), errorHeight: CGFloat = lastError == nil && !searchActive ? 0 : 35
-    sidebar.frame = NSRect(x: 0, y: 166, width: sidebarWidth, height: bodyHeight); sidebar.isHidden = !navigationPane; sidebarScroll.frame = sidebar.bounds
-    sidebarDocument.frame.size.width = sidebarWidth; layoutSidebarRows()
-    content.frame = NSRect(x: sidebarWidth, y: 166 + errorHeight, width: max(0, width - sidebarWidth - paneWidth), height: bodyHeight - errorHeight)
-    errorBar.frame = NSRect(x: sidebarWidth, y: 166, width: width - sidebarWidth - paneWidth, height: errorHeight); errorBar.isHidden = errorHeight == 0
+    let bodyHeight = max(0, height - bodyTop - footerHeight), errorHeight: CGFloat = lastError == nil && !searchActive ? 0 : 35
+    sidebar.frame = NSRect(x: 0, y: bodyTop, width: sidebarWidth, height: bodyHeight); sidebar.isHidden = !navigationPane
+    sidebarScroll.frame = NSRect(x: 0, y: 0, width: max(0, sidebarWidth - 1), height: bodyHeight)
+    layoutSidebarRows()
+    content.frame = NSRect(x: sidebarWidth, y: bodyTop + errorHeight, width: max(0, width - sidebarWidth - paneWidth), height: bodyHeight - errorHeight)
+    errorBar.frame = NSRect(x: sidebarWidth, y: bodyTop, width: width - sidebarWidth - paneWidth, height: errorHeight); errorBar.isHidden = errorHeight == 0
     errorLabel.frame = NSRect(x: 16, y: 9, width: max(0, errorBar.bounds.width - (privacySettings.isHidden ? 110 : 150)), height: 18)
     errorClose.frame = NSRect(x: errorBar.bounds.width - 35, y: 4, width: 27, height: 27)
     privacySettings.frame = NSRect(x: errorBar.bounds.width - 128, y: 4, width: 88, height: 27)
     exitSearch.frame = NSRect(x: errorBar.bounds.width - 91, y: 4, width: 80, height: 27)
-    pane.frame = NSRect(x: width - paneWidth, y: 166, width: paneWidth, height: bodyHeight); pane.isHidden = paneMode.isEmpty
-    let tabsWidth = min(CGFloat(tabs.count) * 218, width - 210)
-    tabsScroll.frame = NSRect(x: 94, y: 12, width: max(0, tabsWidth), height: 36)
-    tabsDocument.frame.size = NSSize(width: CGFloat(tabs.count) * 218, height: 36)
-    addTabButton.frame = NSRect(x: 94 + tabsWidth + 8, y: 15, width: 32, height: 30)
+    pane.frame = NSRect(x: width - paneWidth, y: bodyTop, width: paneWidth, height: bodyHeight); pane.isHidden = paneMode.isEmpty
+    let tabDocumentWidth = tabs.isEmpty ? 0 : CGFloat(tabs.count - 1) * ExplorerTabView.bodyWidth + tabSize.width
+    let tabsWidth = min(tabDocumentWidth, max(0, width - 210))
+    tabsScroll.frame = NSRect(x: 94, y: tabTopInset, width: tabsWidth, height: tabSize.height)
+    tabsDocument.frame.size = NSSize(width: tabDocumentWidth, height: tabSize.height)
+    let addTabHeight: CGFloat = 24
+    addTabButton.frame = NSRect(x: tabsScroll.frame.maxX + 8, y: tabsScroll.frame.midY - addTabHeight / 2, width: 32, height: addTabHeight)
     let navGap: CGFloat = width <= 900 ? 8 : 14, left: CGFloat = width <= 900 ? 10 : 14
     let historyGap: CGFloat = width <= 900 ? 3 : 9
+    let navButtonHeight: CGFloat = 34
+    let navButtonY = navigationBar.bounds.midY - navButtonHeight / 2
     var x = left
-    for control in [backButton, forwardButton, upButton, refreshButton] { control.frame = NSRect(x: x, y: 13, width: 30, height: 34); x += 30 + historyGap }
+    for control in [backButton, forwardButton, upButton, refreshButton] { control.frame = NSRect(x: x, y: navButtonY, width: 30, height: navButtonHeight); x += 30 + historyGap }
     x += navGap - historyGap
     let searchWidth: CGFloat = width <= 900 ? 182 : width <= 1100 ? 200 : 245
-    searchBox.frame = NSRect(x: width - 18 - searchWidth, y: 13, width: searchWidth, height: 35)
-    addressBar.frame = NSRect(x: x, y: 13, width: max(100, searchBox.frame.minX - navGap - x), height: 35)
+    let fieldHeight: CGFloat = 35
+    let fieldY = navigationBar.bounds.midY - fieldHeight / 2
+    searchBox.frame = NSRect(x: width - 18 - searchWidth, y: fieldY, width: searchWidth, height: fieldHeight)
+    addressBar.frame = NSRect(x: x, y: fieldY, width: max(100, searchBox.frame.minX - navGap - x), height: fieldHeight)
     let gap: CGFloat = width <= 900 ? 4 : width <= 1100 ? 6 : 10
     x = width <= 900 ? 12 : 17
     let newWidth = max(90, newButton.intrinsicContentSize.width), menuWidth = max(90, sortButton.intrinsicContentSize.width, viewButton.intrinsicContentSize.width)
-    newButton.frame = NSRect(x: x, y: 11, width: newWidth, height: 34); x += newWidth + gap
+    let toolsX = x + newWidth + 2 * gap + 1
+    let fullWidth = max(0, CGFloat(toolbarOrder.count * 45 - 10))
+    let groupWidth = min(fullWidth, max(35, width - toolsX - (2 * gap + 1 + menuWidth + gap + menuWidth + gap + 35 + gap + (width <= 900 ? 35 : 73) + 17)))
+    let trackHeight = fullWidth > groupWidth ? ExplorerScroller.thickness : 0
+    let commandButtonHeight: CGFloat = 34
+    let commandY = commandBar.bounds.midY - (commandButtonHeight + trackHeight) / 2
+    let dividerY = commandY + (commandButtonHeight - 20) / 2
+    newButton.frame = NSRect(x: x, y: commandY, width: newWidth, height: commandButtonHeight); x += newWidth + gap
     for (key, button) in commands { button.isHidden = !toolbarOrder.contains(key) }
     firstDivider.isHidden = toolbarOrder.isEmpty; secondDivider.isHidden = toolbarOrder.isEmpty; commandToolsScroll.isHidden = toolbarOrder.isEmpty
     if !toolbarOrder.isEmpty {
-      firstDivider.frame = NSRect(x: x, y: 18, width: 1, height: 20); x += 1 + gap
-      let fullWidth = CGFloat(toolbarOrder.count * 45 - 10)
-      let groupWidth = min(fullWidth, max(35, width - x - (2 * gap + 1 + menuWidth + gap + menuWidth + gap + 35 + gap + (width <= 900 ? 35 : 73) + 17)))
-      commandToolsScroll.frame = NSRect(x: x, y: 11, width: groupWidth, height: 34); commandTools.frame = NSRect(x: 0, y: 0, width: fullWidth, height: 34)
-      for (index, key) in toolbarOrder.enumerated() { commands[key]?.frame = NSRect(x: CGFloat(index) * 45, y: 0, width: 35, height: 34) }
-      x += groupWidth + gap; secondDivider.frame = NSRect(x: x, y: 18, width: 1, height: 20); x += 1 + gap
+      firstDivider.frame = NSRect(x: x, y: dividerY, width: 1, height: 20)
+      commandToolsScroll.frame = NSRect(x: toolsX, y: commandY, width: groupWidth, height: commandButtonHeight + trackHeight)
+      commandTools.frame = NSRect(x: 0, y: 0, width: fullWidth, height: commandButtonHeight)
+      for (index, key) in toolbarOrder.enumerated() { commands[key]?.frame = NSRect(x: CGFloat(index) * 45, y: 0, width: 35, height: commandButtonHeight) }
+      x = toolsX + groupWidth + gap; secondDivider.frame = NSRect(x: x, y: dividerY, width: 1, height: 20); x += 1 + gap
     }
-    sortButton.frame = NSRect(x: x, y: 11, width: menuWidth, height: 34); x += menuWidth + gap
-    viewButton.frame = NSRect(x: x, y: 11, width: menuWidth, height: 34); x += menuWidth + gap
-    moreButton.frame = NSRect(x: x, y: 11, width: 35, height: 34)
-    previewButton.frame = NSRect(x: width - (width <= 900 ? 47 : 90), y: 11, width: width <= 900 ? 35 : 73, height: 34)
+    sortButton.frame = NSRect(x: x, y: commandY, width: menuWidth, height: commandButtonHeight); x += menuWidth + gap
+    viewButton.frame = NSRect(x: x, y: commandY, width: menuWidth, height: commandButtonHeight); x += menuWidth + gap
+    moreButton.frame = NSRect(x: x, y: commandY, width: 35, height: commandButtonHeight)
+    previewButton.frame = NSRect(x: width - (width <= 900 ? 47 : 90), y: commandY, width: width <= 900 ? 35 : 73, height: commandButtonHeight)
     previewButton.title = width <= 900 ? "" : NL("预览")
     specialView.frame = content.bounds; loadingView.frame = content.bounds
-    fileScroll.frame = content.bounds
-    if mode != .details {
-      collectionLayout.invalidateLayout(); collectionLayout.prepare()
-      collection.frame.size = collectionLayout.collectionViewContentSize
+    content.layoutViewport(filesVisible: !fileScroll.isHidden && specialView.isHidden && !entries.isEmpty) {
+      if mode == .details {
+        layoutDetailColumns(windowWidth: width)
+        table.tile()
+      } else {
+        collectionLayout.invalidateLayout(); collectionLayout.prepare()
+        collection.frame.size = collectionLayout.collectionViewContentSize
+      }
     }
+    if mode != .details { layoutDetailColumns(windowWidth: width) }
+    emptyState.frame = content.bounds
+    emptyIcon.frame = NSRect(x: (content.bounds.width - 68) / 2, y: max(40, content.bounds.height * 0.35 - 60), width: 68, height: 68)
+    emptyLabel.frame = NSRect(x: 20, y: emptyIcon.frame.maxY + 18, width: content.bounds.width - 40, height: 24)
+    spinner.frame = NSRect(x: (content.bounds.width - 16) / 2, y: emptyIcon.frame.minY, width: 16, height: 16)
+    let footerContent = NSRect(x: 0, y: 1, width: width, height: footerHeight - 1)
+    func layoutStatusLabel(_ label: NSTextField, x: CGFloat, width: CGFloat) {
+      let height = label.intrinsicContentSize.height
+      label.frame = NSRect(x: x, y: footerContent.midY - height / 2, width: width, height: height)
+    }
+    layoutStatusLabel(status, x: 22, width: max(100, width - 360))
+    iconViewButton.frame = NSRect(x: width - 36, y: footerContent.minY, width: 30, height: footerContent.height)
+    detailViewButton.frame = NSRect(x: width - 68, y: footerContent.minY, width: 30, height: footerContent.height)
+    layoutStatusLabel(sizeValue, x: width - 100, width: 27)
+    layoutStatusLabel(sizeLabel, x: width - 267, width: 52)
+    let sliderHeight: CGFloat = 18
+    sizeSlider.frame = NSRect(x: width - 210, y: footerContent.midY - sliderHeight / 2, width: 100, height: sliderHeight)
+    for item in [sizeValue, sizeSlider, sizeLabel] { item.isHidden = mode != .icons }
+    layoutPane()
+  }
+
+  private func layoutDetailColumns(windowWidth width: CGFloat) {
     let insets = FilePaneSurface.detailsInsets
     let available = max(0, fileScroll.contentSize.width - insets.left - insets.right)
     let dateWidth: CGFloat = width <= 900 ? 150 : width <= 1100 ? 153 : 165
     let metadata: [String: CGFloat] = ["modified": dateWidth, "created": dateWidth, "kind": width <= 1100 ? 110 : 132, "size": width <= 900 ? 80 : width <= 1100 ? 85 : 100]
-    var hidden = Set<String>()
-    if width <= 900 { hidden.insert("kind") }
-    if paneWidth > 0 && width <= 1100 { hidden.formUnion(["kind", "size"]) }
-    if paneWidth > 0 && width <= 900 { hidden.insert("modified") }
-    let existingWidth = metadata.filter { $0.key != "created" && !hidden.contains($0.key) }.values.reduce(0, +)
-    // Keep the established columns and a readable filename before adding a second date.
-    if hidden.contains("modified") || available - existingWidth - dateWidth < 250 { hidden.insert("created") }
-    let used = metadata.filter { !hidden.contains($0.key) }.values.reduce(0, +)
+    let used = metadata.filter { detailColumns.visible.contains($0.key) }.values.reduce(0, +)
     syncingColumns = true
     for (index, id) in detailColumns.order.enumerated() {
       if let old = table.tableColumns.firstIndex(where: { $0.identifier.rawValue == id }), old != index { table.moveColumn(old, toColumn: index) }
     }
     for column in table.tableColumns {
       let id = column.identifier.rawValue
-      column.isHidden = detailColumns.automatic ? hidden.contains(id) : !detailColumns.visible.contains(id)
-      column.width = detailColumns.automatic ? (id == "name" ? max(150, available - used) : metadata[id] ?? 100) : detailColumns.widths[id] ?? 100
+      column.isHidden = !detailColumns.visible.contains(id)
+      column.width = detailColumns.automatic ? (id == "name" ? max(column.minWidth, available - used) : metadata[id] ?? 100) : detailColumns.widths[id] ?? 100
     }
     syncingColumns = false
-    content.restoreDocumentOrigin()
-    emptyState.frame = content.bounds
-    emptyIcon.frame = NSRect(x: (content.bounds.width - 68) / 2, y: max(40, content.bounds.height * 0.35 - 60), width: 68, height: 68)
-    emptyLabel.frame = NSRect(x: 20, y: emptyIcon.frame.maxY + 18, width: content.bounds.width - 40, height: 24)
-    spinner.frame = NSRect(x: (content.bounds.width - 16) / 2, y: emptyIcon.frame.minY, width: 16, height: 16)
-    status.frame = NSRect(x: 22, y: 7, width: max(100, width - 360), height: max(17, ExplorerTypography.lineHeight))
-    iconViewButton.frame = NSRect(x: width - 36, y: 1, width: 30, height: 28); detailViewButton.frame = NSRect(x: width - 68, y: 1, width: 30, height: 28)
-    sizeValue.frame = NSRect(x: width - 100, y: 7, width: 27, height: 17); sizeSlider.frame = NSRect(x: width - 210, y: 6, width: 100, height: 18); sizeLabel.frame = NSRect(x: width - 267, y: 7, width: 52, height: 17)
-    for item in [sizeValue, sizeSlider, sizeLabel] { item.isHidden = mode != .icons }
-    layoutPane()
   }
 
   func rebuildTabs() {
     tabsDocument.subviews.forEach { $0.removeFromSuperview() }
+    var previousItem: ExplorerTabView?
     for (index, tab) in tabs.enumerated() {
       let id = tab.id
-      let item = ExplorerTabView(title: locationLabel(tab.directory), active: index == activeTab, onSelect: { [weak self] in guard let self, let index = self.tabs.firstIndex(where: { $0.id == id }) else { return }; self.switchTab(to: index) }, onClose: { [weak self] in guard let self, let index = self.tabs.firstIndex(where: { $0.id == id }) else { return }; self.closeTab(at: index) })
+      let item = ExplorerTabView()
+      item.header = locationLabel(tab.directory)
+      item.isSelected = index == activeTab
+      item.previousTab = previousItem
+      previousItem?.nextTab = item
+      previousItem = item
+      item.onSelect = { [weak self] in
+        guard let self, let index = self.tabs.firstIndex(where: { $0.id == id }) else { return }
+        self.switchTab(to: index)
+      }
+      item.onClose = { [weak self] in
+        guard let self, let index = self.tabs.firstIndex(where: { $0.id == id }) else { return }
+        self.closeTab(at: index)
+      }
       item.onDragValidate = { [weak self] info in self?.dropOperation(info, target: tab.directory, fromTab: true) ?? [] }
       item.onDrop = { [weak self] info in self?.acceptFiles(info, at: tab.directory, fromTab: true) ?? false }
       item.canDetach = { [weak self] in self?.canDetachTab == true }
       item.onDetach = { [weak self] point in self?.detachTab(id: id, at: point) ?? false }
-      if tab.directory.deletingLastPathComponent().path == home.path || tab.directory.path == "/Applications" { item.badgeName = ["Applications": "applications", "Desktop": "desktop", "Documents": "document", "Downloads": "download", "Pictures": "image", "Music": "music", "Movies": "video"][tab.directory.lastPathComponent] }
-      if tab.directory.scheme == "explorer" { item.locationIcon = tab.directory.host == "computer" ? "computer" : tab.directory.host }
-      if tab.directory == home.appendingPathComponent(".Trash") { item.locationIcon = "trash" }
-      item.frame = NSRect(x: CGFloat(index) * 218, y: 0, width: 214, height: 36); tabsDocument.addSubview(item)
+      let badge: String?
+      if tab.directory.deletingLastPathComponent().path == home.path || tab.directory.path == "/Applications" {
+        badge = ["Applications": "applications", "Desktop": "desktop", "Documents": "document",
+                 "Downloads": "download", "Pictures": "image", "Music": "music", "Movies": "video"][tab.directory.lastPathComponent]
+      } else {
+        badge = nil
+      }
+      let locationIcon = tab.directory == home.appendingPathComponent(".Trash") ? "trash"
+        : tab.directory.scheme == "explorer" ? tab.directory.host : nil
+      item.iconSource = { ExplorerTabView.makeLocationIcon(named: locationIcon, badge: badge) }
+      item.frame = NSRect(origin: NSPoint(x: CGFloat(index) * ExplorerTabView.bodyWidth, y: 0), size: ExplorerTabView.size)
+      tabsDocument.addSubview(item)
     }
     view.needsLayout = true
   }
@@ -582,6 +644,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     refreshProviderCloudDrives()
     let scroll = sidebarScroll.contentView.bounds.origin
     sidebarDocument.subviews.forEach { $0.removeFromSuperview() }; sidebarRows = []; placeRows = []
+    let rowHeight = max(32, ExplorerTypography.rowHeight)
     var y: CGFloat = 10
     func divider() { let line = SurfaceView(frame: NSRect(x: 20, y: y + 10, width: max(0, sidebar.bounds.width - 40), height: 1)); line.color = ExplorerPalette.border; line.identifier = NSUserInterfaceItemIdentifier("divider"); sidebarDocument.addSubview(line); y += 21 }
     func row(_ title: String, _ url: URL, _ icon: String, level: Int = 0, pinned: Bool = false, canEject: Bool = false) {
@@ -596,7 +659,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
       item.onDragUpdate = { [weak self, weak item] info, localY in self?.sidebarDrag(info, target: url, row: item, y: localY, pinned: pinned) ?? [] }
       item.onDrop = { [weak self, weak item] info, localY in self?.sidebarDrop(info, target: url, row: item, y: localY, pinned: pinned) ?? false }
       item.onDragExit = { [weak self] in self?.placeMarker.isHidden = true }
-      item.tint = ExplorerPalette.place(icon); item.frame = NSRect(x: 8, y: y, width: max(0, sidebar.bounds.width - 16), height: max(36, ExplorerTypography.rowHeight)); y += max(36, ExplorerTypography.rowHeight)
+      item.tint = ExplorerPalette.place(icon); item.frame = NSRect(x: 8, y: y, width: max(0, sidebar.bounds.width - 16), height: rowHeight); y += rowHeight
       item.toolTip = url.path; sidebarDocument.addSubview(item); sidebarRows.append((url, item))
       if expanded.contains(url.path) {
         if let error = folderErrors[url.path] {
@@ -626,9 +689,10 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     for drive in providerCloudDrives { row(drive.name, drive.url, "cloud") }
     row(NL("回收站"), URL(string: "explorer://trash")!, "trash")
     for (title, icon) in [(NL("隔空投送"), "airdrop"), (NL("网络"), "network")] { row(title, URL(string: "explorer://\(icon)")!, icon) }
-    sidebarDocument.frame.size = NSSize(width: sidebar.bounds.width, height: y + 8)
+    sidebarDocument.frame.size.height = y + 8
     placeMarker.identifier = NSUserInterfaceItemIdentifier("marker"); placeMarker.isHidden = true; sidebarDocument.addSubview(placeMarker)
     sidebarScroll.contentView.scroll(to: NSPoint(x: 0, y: min(scroll.y, max(0, y + 8 - sidebarScroll.contentSize.height)))); sidebarScroll.reflectScrolledClipView(sidebarScroll.contentView)
+    layoutSidebarRows()
   }
   private func sidebarMenu(_ url: URL, canEject: Bool, event: NSEvent) {
     guard let window = view.window else { return }
@@ -665,7 +729,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     if target.absoluteString == "explorer://airdrop", info.draggingPasteboard.availableType(from: [ExplorerSidebarRow.placeType]) == nil, info.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) { return .copy }
     if let index = sidebarInsertion(info, target: target, y: y, pinned: pinned), let place = placeRows.first(where: { $0.0.path == target.path }) {
       let after = index > (pinnedPaths.firstIndex(of: target.path) ?? 0)
-      placeMarker.frame = NSRect(x: 16, y: (after ? place.2 : row.frame.minY) - 1, width: max(0, sidebar.bounds.width - 32), height: 2); placeMarker.isHidden = false
+      placeMarker.frame = NSRect(x: 16, y: (after ? place.2 : row.frame.minY) - 1, width: max(0, sidebarDocument.bounds.width - 32), height: 2); placeMarker.isHidden = false
       return info.draggingPasteboard.availableType(from: [ExplorerSidebarRow.placeType]) != nil ? .move : .copy
     }
     guard info.draggingPasteboard.availableType(from: [ExplorerSidebarRow.placeType]) == nil, target.isFileURL, !target.pathComponents.contains(".Trash"), !target.pathComponents.contains(".Trashes"),
@@ -689,7 +753,15 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     }
     runTransferOperation { control in FileActions.transfer(urls, to: target, move: operation == .move, control: control) }; return true
   }
-  private func layoutSidebarRows() { for item in sidebarDocument.subviews { item.frame.size.width = max(0, sidebar.bounds.width - (item.identifier?.rawValue == "divider" ? 40 : 16)) } }
+  private func layoutSidebarRows() {
+    let width = sidebarScroll.contentSize.width
+    let reservedWidth = max(0, sidebarScroll.bounds.width - width)
+    sidebarDocument.frame.size.width = width
+    for item in sidebarDocument.subviews where item !== placeMarker {
+      let rightInset: CGFloat = item is ExplorerSidebarRow ? 8 : item.identifier?.rawValue == "divider" ? 20 : 12
+      item.frame.size.width = max(0, width - item.frame.minX - max(0, rightInset - reservedWidth))
+    }
+  }
   private func toggleFolder(_ url: URL) {
     if expanded.contains(url.path) { expanded.remove(url.path); rebuildSidebar(); return }
     expanded.insert(url.path); readFolderChildren(url)
@@ -1293,15 +1365,15 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
       let cell = (table.makeView(withIdentifier: .init("group"), owner: self) as? ExplorerGroupCell) ?? ExplorerGroupCell()
       cell.identifier = .init("group"); cell.title = groupTitle(group); cell.collapsed = collapsedGroups.contains(groups[group].id); cell.onToggle = { [weak self] in self?.toggleGroup(at: row) }; return cell
     }
-    guard let index = entryIndex(at: row), let id = tableColumn?.identifier else { return nil }; let entry = entries[index]
+    guard let index = entryIndex(at: row), let tableColumn else { return nil }; let entry = entries[index], id = tableColumn.identifier
     if id.rawValue == "name" {
       let cell = (table.makeView(withIdentifier: id, owner: self) as? NameCell) ?? NameCell(); cell.identifier = id; cell.configure(entry, name: displayName(entry)); cell.checkboxes = checkboxes
       cell.checkbox.state = fileNode(at: row).map(selectionManager.IsSelected) == true ? .on : .off; cell.checkbox.changed = { [weak self] in self?.toggleSelection(at: row, selected: $0) }
       cell.alphaValue = isCut && clipboard.contains(entry.url) ? 0.44 : entry.isHidden ? 0.6 : 1; return cell
     }
     let cell = (table.makeView(withIdentifier: id, owner: self) as? MetadataCell) ?? MetadataCell(); cell.identifier = id; cell.value.font = ExplorerTypography.font()
-    cell.value.alignment = .left
-    switch id.rawValue { case "modified": cell.value.stringValue = entry.modified.map(dateFormatter.string) ?? ""; case "created": cell.value.stringValue = entry.created.map(dateFormatter.string) ?? ""; case "size": cell.value.stringValue = entry.isDirectory ? "" : ExplorerFormat.size(entry.size); cell.value.alignment = .right; default: cell.value.stringValue = entry.kind }; return cell
+    cell.value.alignment = tableColumn.headerCell.alignment
+    switch id.rawValue { case "modified": cell.value.stringValue = entry.modified.map(dateFormatter.string) ?? ""; case "created": cell.value.stringValue = entry.created.map(dateFormatter.string) ?? ""; case "size": cell.value.stringValue = entry.isDirectory ? "" : ExplorerFormat.size(entry.size); default: cell.value.stringValue = entry.kind }; return cell
   }
   func tableViewSelectionDidChange(_ notification: Notification) {
     guard !syncingSelection, mode == .details else { return }
@@ -1487,6 +1559,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     guard !syncingColumns, isViewLoaded, view.window != nil, mode == .details else { return }
     for column in table.tableColumns { detailColumns.widths[column.identifier.rawValue] = column.width }
     detailColumns.automatic = false; saveView(group: "columns")
+    view.needsLayout = true
   }
   func tableViewColumnDidMove(_ notification: Notification) {
     guard !syncingColumns, isViewLoaded, view.window != nil, mode == .details else { return }
@@ -1664,7 +1737,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   private func showPaneText(_ result: NativeFilePreview) {
     guard let text = result.text else { return }
     let preview = NSTextView(); preview.string = text; preview.isEditable = false; preview.font = .monospacedSystemFont(ofSize: 11, weight: .regular); preview.textColor = ExplorerPalette.text; preview.backgroundColor = ExplorerPalette.surface
-    let scroll = NSScrollView(); scroll.documentView = preview; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.identifier = NSUserInterfaceItemIdentifier("text-preview"); paneBody.addSubview(scroll)
+    let scroll = ExplorerScrollView(); scroll.documentView = preview; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.identifier = NSUserInterfaceItemIdentifier("text-preview"); paneBody.addSubview(scroll)
     let heading = label(NL("内容预览"), size: 12); heading.identifier = NSUserInterfaceItemIdentifier("text-heading"); paneBody.addSubview(heading)
     if result.truncated { let note = label(NL("仅显示前 16 KB"), size: 11, color: ExplorerPalette.secondary); note.identifier = NSUserInterfaceItemIdentifier("text-limit"); paneBody.addSubview(note) }
   }

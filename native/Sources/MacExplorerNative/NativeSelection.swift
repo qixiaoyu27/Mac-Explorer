@@ -70,7 +70,7 @@ final class NativeMarqueeSelection {
     if dx != 0 || dy != 0 {
       let next = clip.constrainBoundsRect(clip.bounds.offsetBy(dx: dx, dy: dy)).origin
       if next != clip.bounds.origin {
-        clip.scroll(to: next)
+        scroll.scroll(clip, to: next)
         scroll.reflectScrolledClipView(clip)
       }
     }
@@ -189,6 +189,13 @@ enum NativeSelectionChecks {
       try expect(browser.selectedPaths == [secondPath] && menuIsOpen(), "\(mode.rawValue): Secondary mouse button still opens the item menu")
       dismissMenu()
     }
+    window.makeKeyAndOrderFront(nil)
+    window.contentView?.layoutSubtreeIfNeeded()
+    let addCenter = browser.addTabButton.convert(NSPoint(x: browser.addTabButton.bounds.midX, y: browser.addTabButton.bounds.midY), to: nil)
+    let closeButtons = browser.tabsDocument.subviews.compactMap { $0 as? ExplorerTabView }.flatMap { $0.subviews.compactMap { $0 as? ExplorerButton } }.filter { $0.iconName == "close" && !$0.isHiddenOrHasHiddenAncestor }
+    try expect(!closeButtons.isEmpty && closeButtons.allSatisfy {
+      abs($0.convert(NSPoint(x: $0.bounds.midX, y: $0.bounds.midY), to: nil).y - addCenter.y) < 0.01
+    }, "Tab add and close buttons have the same vertical center in window coordinates")
     return checks
   }
 
@@ -333,8 +340,8 @@ enum NativeSelectionChecks {
     browser.setView(.details)
     window.contentView?.layoutSubtreeIfNeeded()
     guard browser.fileScroll === scroll, scroll.contentView === clip, scroll.documentView === table,
-          header.isDescendant(of: scroll), scroll.hasHorizontalScroller, scroll.hasVerticalScroller else {
-      throw NativeSmoke.Failure(description: "Details installs its layout, native header and scrollers in the same viewport")
+          header.isDescendant(of: scroll), pane.horizontalScroller.superview === pane, pane.verticalScroller.superview === pane else {
+      throw NativeSmoke.Failure(description: "Details installs its native header in the viewport and the scrollers beside it")
     }
     let nameColumn = table.column(withIdentifier: .init("name"))
     guard nameColumn >= 0 else { throw NativeSmoke.Failure(description: "Details fixture has a name column") }
@@ -393,7 +400,7 @@ enum NativeSelectionChecks {
     let firstPoint = pane.convert(detailsStart, from: table)
     let endPoint = pane.convert(detailsEnd, from: table)
     for (startX, sampleX) in [(pane.bounds.minX + 4, pane.bounds.minX + 8),
-                              (pane.bounds.maxX - 4, pane.bounds.maxX - 8)] {
+                              (pane.fileViewport.maxX - 4, pane.fileViewport.maxX - 8)] {
       let start = NSPoint(x: startX, y: firstPoint.y)
       let samplePoint = NSPoint(x: sampleX, y: (firstPoint.y + endPoint.y) / 2)
       let before = sample(at: samplePoint, in: pane)

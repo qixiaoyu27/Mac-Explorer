@@ -78,24 +78,26 @@ final class ExplorerMenu: NSObject {
     panel.level = .popUpMenu; panel.isReleasedWhenClosed = false
     let background = MenuSurface(frame: NSRect(x: 0, y: 0, width: width, height: height))
     panel.contentView = background
-    let scroll = NSScrollView(frame: background.bounds.insetBy(dx: 1, dy: 5))
+    let scroll = ExplorerScrollView(frame: background.bounds.insetBy(dx: 1, dy: 5))
     scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false; scroll.automaticallyAdjustsContentInsets = false
     let surface = SurfaceView(frame: NSRect(x: 0, y: 0, width: width - 2, height: fullHeight - 10)); surface.color = ExplorerPalette.toolbar
     scroll.documentView = surface; background.addSubview(scroll)
+    let contentWidth = scroll.contentSize.width
+    surface.frame.size.width = contentWidth
     var y: CGFloat = 0
     if !quickActions.isEmpty {
-      let itemWidth = (width - 12 - CGFloat(quickActions.count - 1) * 2) / CGFloat(quickActions.count)
+      let itemWidth = (contentWidth - 10 - CGFloat(quickActions.count - 1) * 2) / CGFloat(quickActions.count)
       for (index, item) in quickActions.enumerated() {
         let button = MenuQuickAction(item: item); button.frame = NSRect(x: 5 + CGFloat(index) * (itemWidth + 2), y: 0, width: itemWidth, height: 52); surface.addSubview(button)
       }
-      let line = SurfaceView(frame: NSRect(x: 5, y: 57, width: width - 12, height: 1)); line.color = ExplorerPalette.border; surface.addSubview(line); y += 63
+      let line = SurfaceView(frame: NSRect(x: 5, y: 57, width: contentWidth - 10, height: 1)); line.color = ExplorerPalette.border; surface.addSubview(line); y += 63
     }
     for item in items {
       if item.divider {
-        let separator = SurfaceView(frame: NSRect(x: 8, y: y + 4, width: width - 16, height: 1)); separator.color = ExplorerPalette.border
+        let separator = SurfaceView(frame: NSRect(x: 8, y: y + 4, width: contentWidth - 14, height: 1)); separator.color = ExplorerPalette.border
         surface.addSubview(separator); y += 11
       }
-      let row = MenuRow(item: item, frame: NSRect(x: 5, y: y, width: width - 10, height: rowHeight))
+      let row = MenuRow(item: item, frame: NSRect(x: 5, y: y, width: contentWidth - 8, height: rowHeight))
       let index = rows.count
       row.hover = { [weak self] in self?.highlight(index) }
       row.perform = { [weak self] in self?.activate(index) }

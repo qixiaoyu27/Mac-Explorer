@@ -225,19 +225,20 @@ final class AddressEditBox: NSView, NSTextFieldDelegate {
     surface.color = ExplorerPalette.toolbar
     surface.setAccessibilityRole(.list)
     surface.setAccessibilityLabel(history ? NL("最近输入的地址") : NL("匹配的文件夹"))
-    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+    let scroll = ExplorerScrollView(frame: NSRect(x: 0, y: 0, width: width, height: height))
     scroll.documentView = surface
     scroll.hasVerticalScroller = fullHeight > height
     scroll.autohidesScrollers = true
     scroll.drawsBackground = false
     scroll.automaticallyAdjustsContentInsets = false
     panel.contentView = scroll
+    surface.frame.size.width = scroll.contentSize.width
     for (index, value) in suggestions.enumerated() {
       let row = ExplorerButton(title: value) { [weak self] in self?._HandleUserAction(value) }
       row.alignment = .left
       row.refusesFirstResponder = true
       row.toolTip = value
-      row.frame = NSRect(x: 5, y: 5 + CGFloat(index) * 32, width: width - 18, height: 32)
+      row.frame = NSRect(x: 5, y: 5 + CGFloat(index) * 32, width: surface.bounds.width - 18, height: 32)
       surface.addSubview(row)
       rows.append(row)
     }

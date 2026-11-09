@@ -104,9 +104,13 @@ enum NativeCreatedDateChecks {
       let visible = browser.table.tableColumns.filter { !$0.isHidden }
       let insets = browser.fileScroll.contentInsets
       let available = browser.fileScroll.contentSize.width - insets.left - insets.right
-      try check(column("name").width >= 150 && visible.reduce(0) { $0 + $1.width } <= available + 1, "Columns fit the viewport with a readable name at \(Int(width)) / \(pane)")
-      if width == 1260 { try check(!column("created").isHidden, "Wide detail view exposes both date columns") }
-      if width == 800 { try check(column("created").isHidden && browser.sortMenu().contains { $0.title == NL("创建日期") }, "Narrow layout keeps created-date sorting accessible") }
+      let overflows = visible.reduce(0) { $0 + $1.width } > available + 1
+      try check(visible.map { $0.identifier.rawValue } == DetailColumns.identifiers && column("name").width >= 150 &&
+                browser.content.horizontalScroller.isHidden == !overflows,
+                "Details keeps its columns and scrolls when needed at \(Int(width)) / \(pane)")
+      if width == 800 {
+        try check(overflows && browser.sortMenu().contains { $0.title == NL("创建日期") }, "Narrow Details keeps created-date sorting accessible")
+      }
       try capture(window, at: output.appendingPathComponent("native-created-\(Int(width))-\(pane.isEmpty ? "none" : pane).png"))
     }
     browser.paneMode = ""; window.setContentSize(NSSize(width: 1260, height: 780)); browser.compact = true; browser.updateMode(persist: false)

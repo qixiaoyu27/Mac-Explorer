@@ -1,5 +1,6 @@
 import AppKit
 import ExplorerCore
+import QuartzCore
 
 enum ExplorerFocus { static var keyboardVisible = false }
 
@@ -50,21 +51,202 @@ protocol FilePaneDocument: AnyObject where Self: NSView {
   func fileRows(intersecting rect: NSRect) -> IndexSet
 }
 
+final class FilePaneScrollView: NSScrollView {
+  var onScroll: (() -> Void)?
+
+  override var hasHorizontalScroller: Bool {
+    get { false }
+    set {}
+  }
+
+  override var hasVerticalScroller: Bool {
+    get { false }
+    set {}
+  }
+
+  override func reflectScrolledClipView(_ clip: NSClipView) {
+    super.reflectScrolledClipView(clip)
+    if clip === contentView { onScroll?() }
+  }
+}
+
+final class ExplorerScroller: NSScroller {
+  static let thickness: CGFloat = 10
+  private static let thumbThickness: CGFloat = 6
+  private static let fadeAnimationKey = "thumbFade"
+  private let horizontal: Bool
+  private let thumbLayer = CALayer()
+  private var hovered = false
+  private var tracking = false
+  private var lastScrollOffset: CGFloat?
+  private var pendingFade: DispatchWorkItem?
+  weak var scrollView: NSScrollView?
+
+  init(horizontal: Bool) {
+    self.horizontal = horizontal
+    let thickness = Self.thickness
+    super.init(frame: NSRect(x: 0, y: 0, width: horizontal ? 100 : thickness, height: horizontal ? thickness : 100))
+    wantsLayer = true
+    thumbLayer.opacity = 0
+    layer?.addSublayer(thumbLayer)
+    addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self))
+  }
+
+  required init?(coder: NSCoder) { fatalError() }
+
+  override class func scrollerWidth(for controlSize: NSControl.ControlSize, scrollerStyle: NSScroller.Style) -> CGFloat { thickness }
+  override var isOpaque: Bool { false }
+  override var wantsUpdateLayer: Bool { true }
+
+  var thumbRect: NSRect {
+    let knob = backingAlignedRect(rect(for: .knob), options: .alignAllEdgesNearest)
+    guard !knob.isEmpty else { return .zero }
+    let thumbThickness = Self.thumbThickness
+    if horizontal {
+      return NSRect(x: knob.minX, y: bounds.midY - thumbThickness / 2, width: knob.width, height: thumbThickness)
+    }
+    return NSRect(x: bounds.midX - thumbThickness / 2, y: knob.minY, width: thumbThickness, height: knob.height)
+  }
+
+  func reflectScrollOrigin(_ origin: NSPoint) {
+    let offset = horizontal ? origin.x : origin.y
+    defer { lastScrollOffset = offset }
+    if let lastScrollOffset, lastScrollOffset != offset { revealThumb() }
+  }
+
+  private func setThumbOpacity(_ opacity: Float, animated: Bool = false) {
+    let previous = (thumbLayer.presentation() ?? thumbLayer).opacity
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    thumbLayer.opacity = opacity
+    thumbLayer.removeAnimation(forKey: Self.fadeAnimationKey)
+    if animated && previous != opacity && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+      let fade = CABasicAnimation(keyPath: "opacity")
+      fade.fromValue = previous
+      fade.toValue = opacity
+      fade.duration = 0.2
+      thumbLayer.add(fade, forKey: Self.fadeAnimationKey)
+    }
+    CATransaction.commit()
+  }
+
+  fileprivate func revealThumb() {
+    guard window != nil, isEnabled, !isHiddenOrHasHiddenAncestor else { return }
+    if thumbLayer.opacity != 1 { setThumbOpacity(1) }
+    scheduleFade()
+  }
+
+  private func scheduleFade() {
+    pendingFade?.cancel()
+    pendingFade = nil
+    guard !hovered, !tracking, thumbLayer.opacity > 0 else { return }
+    let fade = DispatchWorkItem { [weak self] in
+      self?.pendingFade = nil
+      self?.setThumbOpacity(0, animated: true)
+    }
+    pendingFade = fade
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: fade)
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    hovered = true
+    revealThumb()
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    hovered = false
+    scheduleFade()
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    tracking = true
+    revealThumb()
+    super.mouseDown(with: event)
+    hovered = explorerPointerIsInside(self)
+    tracking = false
+    scheduleFade()
+  }
+
+  override func viewDidHide() {
+    super.viewDidHide()
+    hovered = false
+    setThumbOpacity(0)
+    scheduleFade()
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    needsDisplay = true
+  }
+
+  override func updateLayer() {
+    let thumb = thumbRect
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      thumbLayer.backgroundColor = ExplorerPalette.scrollbar.cgColor
+    }
+    thumbLayer.isHidden = !isEnabled || thumb.isEmpty
+    thumbLayer.bounds = NSRect(origin: .zero, size: thumb.size)
+    thumbLayer.position = NSPoint(x: thumb.midX, y: thumb.midY)
+    thumbLayer.cornerRadius = min(thumb.width, thumb.height) / 2
+    CATransaction.commit()
+  }
+
+  override func scrollWheel(with event: NSEvent) {
+    if let scrollView { scrollView.scrollWheel(with: event) }
+    else { super.scrollWheel(with: event) }
+  }
+}
+
+class ExplorerScrollView: NSScrollView {
+  override func reflectScrolledClipView(_ clip: NSClipView) {
+    super.reflectScrolledClipView(clip)
+    guard clip === contentView else { return }
+    let origin = clip.bounds.origin
+    (horizontalScroller as? ExplorerScroller)?.reflectScrollOrigin(origin)
+    (verticalScroller as? ExplorerScroller)?.reflectScrollOrigin(origin)
+  }
+
+  override var hasHorizontalScroller: Bool {
+    get { super.hasHorizontalScroller }
+    set {
+      if newValue && horizontalScroller == nil { horizontalScroller = ExplorerScroller(horizontal: true) }
+      super.hasHorizontalScroller = newValue
+    }
+  }
+
+  override var hasVerticalScroller: Bool {
+    get { super.hasVerticalScroller }
+    set {
+      if newValue && verticalScroller == nil { verticalScroller = ExplorerScroller(horizontal: false) }
+      super.hasVerticalScroller = newValue
+    }
+  }
+}
+
 final class FilePaneSurface: SurfaceView {
   static let detailsInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 24)
-  let scroll = NSScrollView()
+  let scroll = FilePaneScrollView()
+  let horizontalScroller = ExplorerScroller(horizontal: true)
+  let verticalScroller = ExplorerScroller(horizontal: false)
   private var origins: [ObjectIdentifier: NSPoint] = [:]
   private var pendingOrigin: NSPoint?
+  private var sizingViewport = false
 
   override init(frame: NSRect) {
     super.init(frame: frame)
-    scroll.autoresizingMask = [.width, .height]
     scroll.automaticallyAdjustsContentInsets = false
-    scroll.hasVerticalScroller = true
-    scroll.hasHorizontalScroller = true
-    scroll.autohidesScrollers = true
     scroll.backgroundColor = ExplorerPalette.surface
     addSubview(scroll)
+    for scroller in [horizontalScroller, verticalScroller] {
+      scroller.isHidden = true
+      scroller.target = self
+      scroller.action = #selector(moveScroller(_:))
+      scroller.scrollView = scroll
+      addSubview(scroller)
+    }
+    scroll.onScroll = { [weak self] in self?.updateScrollers() }
   }
 
   required init?(coder: NSCoder) { fatalError() }
@@ -80,25 +262,97 @@ final class FilePaneSurface: SurfaceView {
     let insets = table == nil ? NSEdgeInsets() : Self.detailsInsets
     scroll.contentInsets = insets
     scroll.documentView = document
-    if table != nil {
-      scroll.hasHorizontalScroller = true
-      scroll.hasVerticalScroller = true
-    }
     pendingOrigin = origins[ObjectIdentifier(document)] ??
       NSPoint(x: -insets.left, y: -(table?.headerView?.frame.height ?? 0))
   }
 
-  func restoreDocumentOrigin() {
-    guard let origin = pendingOrigin else { return }
+  func layoutViewport(filesVisible: Bool, layoutDocument: () -> Void) {
+    let origin = pendingOrigin ?? scroll.contentView.bounds.origin
     pendingOrigin = nil
+    var viewport = bounds
+    var horizontal = false, vertical = false
+    sizingViewport = true
+    while true {
+      if scroll.frame != viewport { scroll.frame = viewport }
+      layoutDocument()
+      guard filesVisible else { break }
+      let (minimum, maximum) = scrollLimits()
+      let needsHorizontal = !horizontal && maximum.x > minimum.x
+      let needsVertical = !vertical && maximum.y > minimum.y
+      guard needsHorizontal || needsVertical else { break }
+      if needsHorizontal {
+        horizontal = true
+        viewport.size.height = max(0, viewport.height - ExplorerScroller.thickness)
+      }
+      if needsVertical {
+        vertical = true
+        viewport.size.width = max(0, viewport.width - ExplorerScroller.thickness)
+      }
+    }
+    if horizontal {
+      horizontalScroller.frame = NSRect(x: viewport.minX, y: viewport.maxY, width: viewport.width, height: bounds.maxY - viewport.maxY)
+    }
+    if vertical {
+      verticalScroller.frame = NSRect(x: viewport.maxX, y: viewport.minY, width: bounds.maxX - viewport.maxX, height: viewport.height)
+    }
+    let revealHorizontal = horizontal && horizontalScroller.isHidden
+    horizontalScroller.isHidden = !horizontal
+    verticalScroller.isHidden = !vertical
     scrollTo(origin)
+    sizingViewport = false
+    updateScrollers()
+    if revealHorizontal { horizontalScroller.revealThumb() }
   }
 
   func scrollTo(_ origin: NSPoint) {
     let clip = scroll.contentView
     let proposed = NSRect(origin: origin, size: clip.bounds.size)
-    clip.scroll(to: clip.constrainBoundsRect(proposed).origin)
+    scroll.scroll(clip, to: clip.constrainBoundsRect(proposed).origin)
     scroll.reflectScrolledClipView(clip)
+  }
+
+  private func scrollLimits() -> (minimum: NSPoint, maximum: NSPoint) {
+    let clip = scroll.contentView
+    let insets = scroll.contentInsets
+    let extent = clip.documentRect.insetBy(dx: -clip.bounds.width - insets.left - insets.right,
+                                          dy: -clip.bounds.height - insets.top - insets.bottom)
+    let minimum = NSRect(origin: extent.origin, size: clip.bounds.size)
+    let maximum = NSRect(origin: NSPoint(x: extent.maxX, y: extent.maxY), size: clip.bounds.size)
+    return (clip.constrainBoundsRect(minimum).origin, clip.constrainBoundsRect(maximum).origin)
+  }
+
+  private func updateScrollers() {
+    guard !sizingViewport, !horizontalScroller.isHidden || !verticalScroller.isHidden else { return }
+    let (minimum, maximum) = scrollLimits()
+    let origin = scroll.contentView.bounds.origin, visible = fileViewport.size
+    func update(_ scroller: ExplorerScroller, offset: CGFloat, range: CGFloat, page: CGFloat) {
+      guard !scroller.isHidden else { return }
+      scroller.isEnabled = range > 0
+      scroller.knobProportion = range > 0 ? page / (page + range) : 1
+      scroller.doubleValue = range > 0 ? Double(max(0, min(1, offset / range))) : 0
+      scroller.reflectScrollOrigin(origin)
+    }
+    update(horizontalScroller, offset: origin.x - minimum.x, range: maximum.x - minimum.x, page: visible.width)
+    update(verticalScroller, offset: origin.y - minimum.y, range: maximum.y - minimum.y, page: visible.height)
+  }
+
+  @objc private func moveScroller(_ scroller: NSScroller) {
+    let horizontal = scroller === horizontalScroller
+    let (minimum, maximum) = scrollLimits()
+    let start = horizontal ? minimum.x : minimum.y
+    let end = horizontal ? maximum.x : maximum.y
+    var origin = scroll.contentView.bounds.origin
+    let axis = horizontal ? \NSPoint.x : \NSPoint.y
+    let line = horizontal ? scroll.horizontalLineScroll : scroll.verticalLineScroll
+    let page = horizontal ? fileViewport.width - scroll.horizontalPageScroll : fileViewport.height - scroll.verticalPageScroll
+    switch scroller.hitPart {
+    case .decrementLine: origin[keyPath: axis] -= line
+    case .incrementLine: origin[keyPath: axis] += line
+    case .decrementPage: origin[keyPath: axis] -= max(line, page)
+    case .incrementPage: origin[keyPath: axis] += max(line, page)
+    default: origin[keyPath: axis] = start + (end - start) * scroller.doubleValue
+    }
+    scrollTo(origin)
   }
 
   var fileViewport: NSRect {
@@ -129,7 +383,14 @@ final class FilePaneSurface: SurfaceView {
 }
 
 final class ExplorerTabBar: SurfaceView {
-  override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+  override func mouseDown(with event: NSEvent) {
+    guard let window else { return }
+    if event.clickCount == 2 {
+      window.performZoom(nil)
+    } else {
+      window.performDrag(with: event)
+    }
+  }
 }
 final class ExplorerLoadingView: SurfaceView {
   override func draw(_ dirtyRect: NSRect) {
@@ -264,22 +525,27 @@ final class ExplorerCheckbox: NSButton {
 }
 
 final class NameCell: NSTableCellView {
+  private static let iconSize: CGFloat = 22
   let icon = FileIconView(); let nameLabel = label(""); let checkbox = ExplorerCheckbox()
   var checkboxes = false { didSet { needsLayout = true } }
   override var isFlipped: Bool { true }
+  static func textLeading(checkboxes: Bool) -> CGFloat {
+    HorizontalFileGeometry.nameLeading(iconLeading: HorizontalFileGeometry.leading(checkboxes: checkboxes), iconSize: iconSize)
+  }
   override init(frame: NSRect) {
     super.init(frame: frame); [icon, nameLabel, checkbox].forEach(addSubview)
-    icon.imageScaling = .scaleProportionallyUpOrDown; textField = nameLabel
+    icon.imageScaling = .scaleProportionallyUpOrDown; nameLabel.alignment = .left; textField = nameLabel
   }
   required init?(coder: NSCoder) { fatalError() }
   override func layout() {
     super.layout(); checkbox.available = checkboxes
     checkbox.hovered = (superview as? FileRowView)?.hovered ?? false
     checkbox.frame = NSRect(x: 7, y: (bounds.height - 14) / 2, width: 14, height: 14)
-    let left: CGFloat = checkboxes ? 30 : 12
-    icon.frame = NSRect(x: left, y: (bounds.height - 22) / 2, width: 22, height: 22)
+    let left = HorizontalFileGeometry.leading(checkboxes: checkboxes), iconSize = Self.iconSize
+    icon.frame = NSRect(x: left, y: (bounds.height - iconSize) / 2, width: iconSize, height: iconSize)
     let height: CGFloat = max(nameLabel.isEditable ? 24 : 17, ceil(nameLabel.font?.ascender ?? 13) - floor(nameLabel.font?.descender ?? -3) + 2)
-    nameLabel.frame = NSRect(x: left + 31 - (nameLabel.isEditable ? 2 : 0), y: (bounds.height - height) / 2, width: max(0, min(nameLabel.isEditable ? 240 : bounds.width, bounds.width - left - 43)), height: height)
+    let textLeading = Self.textLeading(checkboxes: checkboxes)
+    nameLabel.frame = NSRect(x: textLeading - (nameLabel.isEditable ? 2 : 0), y: (bounds.height - height) / 2, width: max(0, min(nameLabel.isEditable ? 240 : bounds.width, bounds.width - textLeading - MetadataCell.textInset)), height: height)
   }
   func configure(_ entry: FileEntry, name: String? = nil) {
     nameLabel.font = ExplorerTypography.font()
@@ -291,11 +557,12 @@ final class NameCell: NSTableCellView {
 }
 final class TopStackView: NSStackView { override var isFlipped: Bool { true } }
 final class MetadataCell: NSTableCellView {
+  static let textInset: CGFloat = 12
   let value = label("", color: ExplorerPalette.secondary)
   override var isFlipped: Bool { true }
   override init(frame: NSRect) { super.init(frame: frame); addSubview(value); textField = value }
   required init?(coder: NSCoder) { fatalError() }
-  override func layout() { super.layout(); let height = max(17, ceil(value.font?.ascender ?? 13) - floor(value.font?.descender ?? -3) + 2); value.frame = NSRect(x: 12, y: (bounds.height - height) / 2, width: max(0, bounds.width - 24), height: height) }
+  override func layout() { super.layout(); let height = max(17, ceil(value.font?.ascender ?? 13) - floor(value.font?.descender ?? -3) + 2); value.frame = NSRect(x: Self.textInset, y: (bounds.height - height) / 2, width: max(0, bounds.width - 2 * Self.textInset), height: height) }
 }
 final class ExplorerTableHeaderView: NSTableHeaderView {
   var onMenu: ((NSEvent) -> Void)?
@@ -304,19 +571,28 @@ final class ExplorerTableHeaderView: NSTableHeaderView {
 
 final class ExplorerHeaderCell: NSTableHeaderCell {
   var ascending: Bool?
-  override func draw(withFrame fullFrame: NSRect, in controlView: NSView) {
-    ExplorerPalette.surface.setFill(); fullFrame.fill()
-    let cellFrame = NSRect(x: fullFrame.minX, y: fullFrame.minY, width: fullFrame.width, height: fullFrame.height - 4)
-    let text = stringValue as NSString
-    let attrs: [NSAttributedString.Key: Any] = [.font: ExplorerTypography.font(), .foregroundColor: ExplorerPalette.secondary]
-    let isSize = stringValue == NL("大小")
-    let x = isSize ? cellFrame.maxX - text.size(withAttributes: attrs).width - 12 : cellFrame.minX + 12
-    text.draw(at: NSPoint(x: x, y: cellFrame.midY - text.size(withAttributes: attrs).height / 2), withAttributes: attrs)
+  var textLeading = MetadataCell.textInset
+  override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
+    ExplorerPalette.surface.setFill(); cellFrame.fill()
+    let bottomBorderY = cellFrame.maxY - 1
+    let contentMidY = (cellFrame.minY + bottomBorderY) / 2
+    let titleCell = NSTextFieldCell(textCell: stringValue)
+    titleCell.lineBreakMode = .byTruncatingTail; titleCell.font = ExplorerTypography.font()
+    titleCell.textColor = ExplorerPalette.secondary; titleCell.alignment = alignment
+    let titleSize = titleCell.cellSize
+    let arrowSpace: CGFloat = ascending == nil ? 0 : 16
+    let left = cellFrame.minX + textLeading, right = cellFrame.maxX - MetadataCell.textInset
+    let titleFrame = NSRect(x: left + (alignment == .right ? arrowSpace : 0), y: contentMidY - titleSize.height / 2,
+                            width: max(0, right - left - arrowSpace), height: titleSize.height)
+    titleCell.draw(withFrame: titleFrame, in: controlView)
     ExplorerPalette.border.setFill()
-    NSRect(x: cellFrame.maxX - 1, y: cellFrame.minY + 7, width: 1, height: 25).fill()
-    NSRect(x: cellFrame.minX, y: cellFrame.maxY - 1, width: cellFrame.width, height: 1).fill()
+    let dividerY = cellFrame.minY + 7
+    NSRect(x: cellFrame.maxX - 1, y: dividerY, width: 1, height: max(0, bottomBorderY - dividerY - 4)).fill()
+    NSRect(x: cellFrame.minX, y: bottomBorderY, width: cellFrame.width, height: 1).fill()
     if let ascending {
-      ExplorerIcons.image(ascending ? "chevronUp" : "chevronDown", size: 12, color: ExplorerPalette.secondary).draw(in: NSRect(x: x + text.size(withAttributes: attrs).width + 8, y: cellFrame.midY - 6, width: 12, height: 12), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+      let titleWidth = min(titleFrame.width, titleSize.width)
+      let x = alignment == .right ? titleFrame.maxX - titleWidth - arrowSpace : titleFrame.minX + titleWidth + 4
+      ExplorerIcons.image(ascending ? "chevronUp" : "chevronDown", size: 12, color: ExplorerPalette.secondary).draw(in: NSRect(x: x, y: contentMidY - 6, width: 12, height: 12), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
   }
   override func drawSortIndicator(withFrame cellFrame: NSRect, in controlView: NSView, ascending: Bool, priority: Int) {}

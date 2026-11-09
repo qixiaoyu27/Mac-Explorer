@@ -706,7 +706,7 @@ final class EDBatchRenameForm: EDView, NSTextFieldDelegate {
   private let changeExtension = NSButton(checkboxWithTitle: NL("更改文件扩展名"), target: nil, action: nil)
   private let fileExtension = ExplorerTextField()
   private let preview = edLabel("", size: 12, wraps: true)
-  private let previewScroll = NSScrollView()
+  private let previewScroll = ExplorerScrollView()
   private var previewValid = true
   private let sourceLabel = edLabel(NL("编辑源文件名"))
   private let prefixLabel = edLabel(NL("前缀"))
@@ -851,14 +851,13 @@ private final class EDFlow: EDView {
 }
 
 private class EDScrollingBody: EDView {
-  let scroll = NSScrollView()
+  let scroll = ExplorerScrollView()
   let flow = EDFlow()
   var bordered = false
   override init(frame: NSRect = .zero) {
     super.init(frame: frame)
     scroll.hasVerticalScroller = true
     scroll.autohidesScrollers = true
-    scroll.scrollerStyle = .overlay
     scroll.drawsBackground = false
     scroll.borderType = .noBorder
     scroll.documentView = flow

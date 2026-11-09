@@ -23,7 +23,7 @@ final class ExplorerSpecialView: SurfaceView, NetServiceBrowserDelegate, NetServ
   private let volumeLoader: () async throws -> [NativeVolume]
   private let discoveryEnabled: Bool
   private let volumeStatus = label("", color: ExplorerPalette.secondary)
-  private let scroll = NSScrollView(), document = SurfaceView()
+  private let scroll = ExplorerScrollView(), document = SurfaceView()
   private let heading = label("", size: 20)
   private let choose = EDButton(title: NL("选择文件…"), style: .primary)
   private let server = NSTextField(string: "smb://")

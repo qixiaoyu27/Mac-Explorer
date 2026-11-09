@@ -20,7 +20,7 @@ final class NativeVCSWindow: NSWindowController, NSWindowDelegate, NSTextViewDel
   private let output = NSTextView()
   private let message = NSTextView()
   private let messageLabel = NSTextField(labelWithString: NL("提交信息"))
-  private let messageScroll = NSScrollView()
+  private let messageScroll = ExplorerScrollView()
   private let tabs = NSSegmentedControl(labels: [NL("未暂存"), NL("已暂存")], trackingMode: .selectOne, target: nil, action: nil)
   private let confirm = NSButton(title: "", target: nil, action: nil)
   private let retry = NSButton(title: NL("重新预览"), target: nil, action: nil)
@@ -53,7 +53,7 @@ final class NativeVCSWindow: NSWindowController, NSWindowDelegate, NSTextViewDel
     location.stringValue = directory.path; location.font = .systemFont(ofSize: 12); location.textColor = .secondaryLabelColor
     location.setAccessibilityLabel(NL("仓库")); location.maximumNumberOfLines = 2; stack.addArrangedSubview(location)
     tabs.target = self; tabs.action = #selector(changeDiff); tabs.selectedSegment = 0; tabs.isHidden = true; stack.addArrangedSubview(tabs)
-    let scroll = NSScrollView(); scroll.borderType = .bezelBorder; scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true
+    let scroll = ExplorerScrollView(); scroll.borderType = .bezelBorder; scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true
     output.isEditable = false; output.isSelectable = true; output.font = .monospacedSystemFont(ofSize: 12, weight: .regular); output.isRichText = false
     output.autoresizingMask = [.width]; output.textContainerInset = NSSize(width: 10, height: 10); output.minSize = NSSize(width: 0, height: 0)
     output.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude); output.isVerticallyResizable = true

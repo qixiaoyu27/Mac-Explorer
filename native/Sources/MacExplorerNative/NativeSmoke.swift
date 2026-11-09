@@ -53,6 +53,11 @@ enum NativeSmoke {
         try write(["passed": true, "checks": checks], to: report)
         NSApp.terminate(nil); return
       }
+      if ProcessInfo.processInfo.arguments.contains("--smoke-file-scrollbars") {
+        try await until { !browser.loading && browser.entries.count >= 100 }
+        checks += try await NativeColumnChecks.runScrollbars(browser: browser, window: window)
+        try write(["passed": true, "checks": checks], to: report); NSApp.terminate(nil); return
+      }
       if ProcessInfo.processInfo.arguments.contains("--smoke-vcs-edit") {
         checks += try await NativeVCSEditingChecks.run()
         try write(["passed": true, "checks": checks], to: report)
@@ -133,6 +138,7 @@ enum NativeSmoke {
       } else { throw Failure(description: "Grouping creates headers for the selection fixture") }
       browser.setGrouping(.none); browser.selectedPaths = selected; browser.setView(.icons)
       checks += try NativeSelectionChecks.runFileMarquee(browser: browser, window: window)
+      checks += try await NativeColumnChecks.runScrollbars(browser: browser, window: window)
       if ProcessInfo.processInfo.arguments.contains("--smoke-selection") {
         checks += try NativeSelectionChecks.run()
         try write(["passed": true, "checks": checks, "metrics": metrics], to: report)

@@ -27,7 +27,7 @@ final class NativeArchiveWindow: NSWindowController, NSWindowDelegate, NSTableVi
   private let extractAll = NSButton(title: NL("全部解压"), target: nil, action: nil)
   private let extractSelected = NSButton(title: NL("解压所选"), target: nil, action: nil)
   private let table = ArchiveTable()
-  private let scroll = NSScrollView()
+  private let scroll = ExplorerScrollView()
   private let status = label(NL("正在读取…"), size: 12)
 
   var visibleEntryPaths: [String] { rows.map(\.path) }
