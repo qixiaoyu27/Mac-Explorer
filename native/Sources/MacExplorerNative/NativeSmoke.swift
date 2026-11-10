@@ -130,17 +130,25 @@ enum NativeSmoke {
       shiftIconArrow(123)
       try expect(browser.selectedPaths == selected, "Icon Shift Left contracts to the original selection")
       browser.setView(.details); browser.setGrouping(.kind)
+      let fileDragURLs: [URL], fileDragPaths: Set<String>
       if let groupRow = browser.displayRows.firstIndex(where: { $0.group != nil }) {
         browser.toggleGroup(at: groupRow)
         try expect(browser.selectedPaths == selected && browser.table.selectedRowIndexes.isEmpty, "Collapsed selection remains available to file commands")
+        guard let visibleFile = browser.displayRows.compactMap(\.entry).first else {
+          throw Failure(description: "The drag fixture needs a visible file beside the collapsed group")
+        }
+        fileDragPaths = selected.union([browser.entries[visibleFile].id])
+        browser.selectedPaths = fileDragPaths
+        fileDragURLs = browser.itemActionsManager.draggedURLs?() ?? []
         browser.selectAllFiles()
         try expect(browser.selectedEntries().count == 10_003 && browser.table.selectedRowIndexes.count < 10_003, "Select All includes collapsed files without projecting hidden rows")
       } else { throw Failure(description: "Grouping creates headers for the selection fixture") }
       browser.setGrouping(.none); browser.selectedPaths = selected; browser.setView(.icons)
-      checks += try NativeSelectionChecks.runFileMarquee(browser: browser, window: window)
+      checks += try await NativeSelectionChecks.runFileMarquee(browser: browser, window: window)
       checks += try await NativeColumnChecks.runScrollbars(browser: browser, window: window)
       if ProcessInfo.processInfo.arguments.contains("--smoke-selection") {
         checks += try NativeSelectionChecks.run()
+        checks.append(try NativeSelectionChecks.runAppKitFileDrag(window: window, urls: fileDragURLs, expectedPaths: fileDragPaths))
         try write(["passed": true, "checks": checks, "metrics": metrics], to: report)
         NSApp.terminate(nil); return
       }
@@ -299,6 +307,7 @@ enum NativeSmoke {
       browser.navigate(to: root)
       try await until { !browser.loading && browser.entries.count == 10_003 }
       metrics["iconLoadsAfterAllInteractions"] = IconLoader.shared.loads
+      checks.append(try NativeSelectionChecks.runAppKitFileDrag(window: window, urls: fileDragURLs, expectedPaths: fileDragPaths))
       try write(["passed": true, "checks": checks, "metrics": metrics], to: report)
       NSApp.terminate(nil)
     } catch {

@@ -15,8 +15,11 @@ private final class FixtureDrag: NSObject, NSDraggingInfo {
   var animatesToDestination = false
   var numberOfValidItemsForDrop = 0
   var springLoadingHighlight: NSSpringLoadingHighlight { .none }
-  init(row: NSView, y: CGFloat, board: NSPasteboard) {
-    draggingDestinationWindow = row.window; draggingLocation = row.convert(NSPoint(x: 45, y: y), to: nil); draggingPasteboard = board; draggingSequenceNumber = board.changeCount
+  convenience init(row: NSView, y: CGFloat, board: NSPasteboard) {
+    self.init(view: row, point: NSPoint(x: 45, y: y), board: board)
+  }
+  init(view: NSView, point: NSPoint, board: NSPasteboard) {
+    draggingDestinationWindow = view.window; draggingLocation = view.convert(point, to: nil); draggingPasteboard = board; draggingSequenceNumber = board.changeCount
   }
   func slideDraggedImage(to screenPoint: NSPoint) {}
   nonisolated override func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
@@ -102,6 +105,9 @@ enum NativeInteractionChecks {
     try check(fm.fileExists(atPath: extra.path) && browser.pinnedPaths[1] == extra.path, "Pinned folder remains at its original filesystem location")
     try check(await browser.pinFolders([root.appendingPathComponent("Package.app")], at: 0) == false, "Application packages cannot be pinned as folders")
     try check(await browser.pinFolders([root.appendingPathComponent(".Trash")], at: 0) == false, "Trash cannot be pinned through folder drops")
+    board.clearContents(); board.writeObjects([URL(fileURLWithPath: downloads) as NSURL])
+    let sidebarFolder = try place(downloads), sidebarSelf = FixtureDrag(row: sidebarFolder, y: 18, board: board)
+    try check(sidebarFolder.draggingUpdated(sidebarSelf).isEmpty && !sidebarFolder.performDragOperation(sidebarSelf), "The sidebar rejects a folder dragged onto itself")
     let incoming = root.appendingPathComponent("incoming.txt"); try Data("incoming payload".utf8).write(to: incoming)
     board.clearContents(); board.writeObjects([incoming as NSURL])
     let destination = try place(downloads), fileDrag = FixtureDrag(row: destination, y: 18, board: board)
@@ -216,6 +222,45 @@ enum NativeInteractionChecks {
     try await until { browser.entries.contains { $0.name == "zz-after-close.txt" } }
     try check(detached.automaticRefreshCount == refreshes && window.isVisible, "Closing one window stops its watcher without stopping other windows")
     try check(try (0..<120).allSatisfy { try Data(contentsOf: docs.appendingPathComponent("item\($0).txt")) == Data("payload \($0)".utf8) }, "All 120 original fixture files remain unchanged")
+
+    browser.navigate(to: root)
+    try await until { !browser.loading && browser.snapshot?.directory.path == root.path }
+    func row(for url: URL) throws -> Int {
+      guard let row = browser.displayRows.firstIndex(where: { $0.entry.map { browser.entries[$0].url.path == url.path } == true }) else {
+        throw NativeSmoke.Failure(description: "Missing fixture folder for drop validation")
+      }
+      return row
+    }
+    board.clearContents(); board.writeObjects([docs as NSURL])
+    browser.setView(.details); browser.setGrouping(.none); window.contentView?.layoutSubtreeIfNeeded()
+    let sourceRow = try row(for: docs), neighborRow = try row(for: extra)
+    let sourceRect = browser.table.rect(ofRow: sourceRow), neighborRect = browser.table.rect(ofRow: neighborRow)
+    let detailsNeighbor = FixtureDrag(view: browser.table, point: NSPoint(x: 60, y: neighborRect.midY), board: board)
+    let detailsSelf = FixtureDrag(view: browser.table, point: NSPoint(x: 60, y: sourceRect.midY), board: board)
+    try check(!browser.tableView(browser.table, validateDrop: detailsNeighbor, proposedRow: sourceRow, proposedDropOperation: .above).isEmpty, "Details validates the folder under the pointer despite a stale proposed row")
+    try check(browser.tableView(browser.table, validateDrop: detailsSelf, proposedRow: neighborRow, proposedDropOperation: .on).isEmpty
+      && browser.table.draggingDestinationFeedbackStyle == .none
+      && !browser.tableView(browser.table, acceptDrop: detailsSelf, row: neighborRow, dropOperation: .on), "Details clears the previous target and rejects a drop onto the source folder")
+
+    browser.setView(.icons, size: 64); window.contentView?.layoutSubtreeIfNeeded()
+    let sourceIndex = IndexPath(item: try row(for: docs), section: 0), neighborIndex = IndexPath(item: try row(for: extra), section: 0)
+    guard let sourceFrame = browser.collection.layoutAttributesForItem(at: sourceIndex)?.frame,
+          let neighborFrame = browser.collection.layoutAttributesForItem(at: neighborIndex)?.frame,
+          let neighborItem = browser.collection.item(at: neighborIndex) else { throw NativeSmoke.Failure(description: "Missing visible icon drop fixture") }
+    let iconNeighbor = FixtureDrag(view: browser.collection, point: NSPoint(x: neighborFrame.midX, y: neighborFrame.midY), board: board)
+    let iconSelf = FixtureDrag(view: browser.collection, point: NSPoint(x: sourceFrame.midX, y: sourceFrame.midY), board: board)
+    var proposedIndex = sourceIndex as NSIndexPath, proposedOperation = NSCollectionView.DropOperation.before
+    try check(!browser.collectionView(browser.collection, validateDrop: iconNeighbor, proposedIndexPath: &proposedIndex, dropOperation: &proposedOperation).isEmpty
+      && proposedIndex == neighborIndex as NSIndexPath && proposedOperation == .on, "Icons retargets the proposal to the folder under the pointer")
+    neighborItem.highlightState = .asDropTarget
+    try check(browser.collectionView(browser.collection, validateDrop: iconSelf, proposedIndexPath: &proposedIndex, dropOperation: &proposedOperation).isEmpty
+      && neighborItem.highlightState == .none
+      && !browser.collectionView(browser.collection, acceptDrop: iconSelf, indexPath: neighborIndex, dropOperation: .on), "Icons clears a stale highlight and rejects a drop onto the source folder")
+    let gap = NSPoint(x: browser.collection.visibleRect.maxX - 3, y: neighborFrame.midY)
+    let iconGap = FixtureDrag(view: browser.collection, point: gap, board: board)
+    try check(!browser.collectionView(browser.collection, validateDrop: iconGap, proposedIndexPath: &proposedIndex, dropOperation: &proposedOperation).isEmpty
+      && proposedIndex.item == browser.displayRows.count && proposedOperation == .before
+      && browser.collectionLayout.layoutAttributesForDropTarget(at: gap)?.isHidden == true, "Icon view whitespace targets the current folder without an insertion marker")
     return checks
   }
   private static func mouse(_ type: NSEvent.EventType, point: NSPoint, window: NSWindow, button: Int = 0) -> NSEvent {

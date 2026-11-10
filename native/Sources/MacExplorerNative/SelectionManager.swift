@@ -1,9 +1,16 @@
 import AppKit
 
-final class SelectionManager: NSObject, NSDraggingSource {
+final class SelectionManager {
+  enum InputResult {
+    case ignored
+    case handled
+    case itemAction(FileItemInput)
+  }
+
   private struct MouseDown {
     let event: NSEvent
-    let row: Int?
+    let document: any FilePaneDocument
+    let item: FileSelectionNode?
     let modifiers: FileSelectionModifiers
     let selectsOnRelease: Bool
   }
@@ -13,10 +20,6 @@ final class SelectionManager: NSObject, NSDraggingSource {
   var topology = FileSelectionTopology()
   var onSelectionChanged: ((IndexSet?) -> Void)?
   var onGroupClick: ((Int) -> Void)?
-  var openSelection: (() -> Void)?
-  var showContext: ((NSPoint) -> Void)?
-  var draggedURLs: (() -> [URL])?
-  var finishedDragging: ((NSDragOperation) -> Void)?
 
   private var mouseDown: MouseDown?
   private var marquee: NativeMarqueeSelection?
@@ -27,6 +30,8 @@ final class SelectionManager: NSObject, NSDraggingSource {
   var isMarqueeActive: Bool { marquee != nil }
 
   func IsSelected(_ node: FileSelectionNode) -> Bool { state.contains(node) }
+
+  func GetSelection() -> [FileSelectionNode] { topology.items.filter(IsSelected) }
 
   func fileNode(at row: Int) -> FileSelectionNode? {
     guard topology.fileRows.contains(row) else { return nil }
@@ -43,9 +48,12 @@ final class SelectionManager: NSObject, NSDraggingSource {
     if notify { onSelectionChanged?(nil) }
   }
 
-  func onCollectionChanged(previous: FileSelectionTopology, regroupingFrom oldTopology: FileSelectionTopology?) {
-    if let oldTopology { state.regroup(from: oldTopology, to: topology) }
+  func OnCollectionEvent(previous: FileSelectionTopology) {
     state.reconcile(with: topology, previous: previous)
+  }
+
+  func OnGroupByChanged(previous: FileSelectionTopology) {
+    state.regroup(from: previous, to: topology)
   }
 
   func focusedRow(fallback: @autoclosure () -> Int?) -> Int? {
@@ -57,28 +65,34 @@ final class SelectionManager: NSObject, NSDraggingSource {
     onSelectionChanged?(affected)
   }
 
-  func SelectionChange(at row: Int, modifiers: FileSelectionModifiers, keyboard: Bool = false) {
+  func SelectionChange(at row: Int, modifiers: FileSelectionModifiers) {
     guard let node = fileNode(at: row) else { return }
-    let affected = modifiers == .toggle ? (keyboard ? IndexSet() : IndexSet(integer: row)) : nil
-    SelectionChange(keyboard ? .move(node, modifiers) : .click(node, modifiers), affected: affected)
+    SelectionChange(.click(node, modifiers), affected: modifiers == .toggle ? IndexSet(integer: row) : nil)
   }
 
-  func HandleInputEvent(_ event: NSEvent) -> Bool {
-    guard let itemsView, let window = itemsView.window else { return false }
+  func UserMovedFocusWithKeyboard(to row: Int, modifiers: FileSelectionModifiers) {
+    guard let node = fileNode(at: row) else { return }
+    SelectionChange(.move(node, modifiers), affected: modifiers == .toggle ? IndexSet() : nil)
+  }
+
+  func HandleInputEvent(_ event: NSEvent) -> InputResult {
+    guard let itemsView, let window = itemsView.window else { return .ignored }
     if event.type == .flagsChanged, window.isKeyWindow, event.window == nil || event.window === window {
       marqueeModifiers = FileSelectionModifiers(event.modifierFlags.subtracting(.control))
-      return false
+      return .ignored
     }
-    guard event.window === window else { return false }
+    guard event.window === window else { return .ignored }
     switch event.type {
     case .leftMouseDown where !event.modifierFlags.contains(.control):
-      return _HandleLeftMouseDown(event, in: itemsView)
+      return _HandleLeftMouseDown(event, in: itemsView) ? .handled : .ignored
     case .leftMouseDown, .rightMouseDown:
-      guard let document = itemsView.document(at: event) else { return false }
-      _HandleRightMouseDown(event, in: document)
-      return true
+      return HandleContextMenu(event)
     case .leftMouseDragged, .leftMouseUp:
-      guard let mouseDown, let document = itemsView.scroll.documentView as? any FilePaneDocument else { return false }
+      guard let mouseDown else { return .ignored }
+      guard itemsView.scroll.documentView === mouseDown.document else {
+        endTracking(restoreSelection: true)
+        return .ignored
+      }
       let pointer = event.locationInWindow
       let origin = mouseDown.event.locationInWindow
       let moved = abs(pointer.x - origin.x) > 4 || abs(pointer.y - origin.y) > 4
@@ -87,62 +101,69 @@ final class SelectionManager: NSObject, NSDraggingSource {
           marqueeModifiers = FileSelectionModifiers(event.modifierFlags.subtracting(.control))
           if moved, !marquee.isDragging {
             selectionBeforeMarquee = state
-            if let row = mouseDown.row {
-              SelectionChange(at: row, modifiers: mouseDown.modifiers)
+            if let item = mouseDown.item {
+              SelectionChange(.click(item, mouseDown.modifiers))
             } else if marqueeModifiers.isEmpty {
               SelectionChange(.clearItems)
             }
-            marquee.beginDragging()
           }
-          if marquee.isDragging { marquee.setEndpoint(pointer) }
+          marquee.OnMouseMoved(to: pointer, crossedThreshold: moved)
         } else if moved {
           if mouseDown.modifiers == .toggle,
-             case let .file(row) = document.selectableItem(at: document.convert(pointer, from: nil)),
+             case let .file(row)? = itemsView.pointerTarget(at: event)?.hit,
              let node = fileNode(at: row), !IsSelected(node) {
             SelectionChange(at: row, modifiers: mouseDown.modifiers)
           }
           endTracking()
-          beginFileDrag(event, from: document)
+          return .itemAction(.drag(event, document: mouseDown.document))
         }
-        return true
+        return .handled
       }
       let armedMarquee = isMarqueeActive
       let completedMarquee = marquee?.isDragging == true
       endTracking()
-      if !completedMarquee { _HandleLeftMouseUp(event, down: mouseDown, in: itemsView, armedMarquee: armedMarquee) }
-      return true
+      guard !completedMarquee else { return .handled }
+      let hit = itemsView.pointerTarget(at: event)?.hit
+      _HandleLeftMouseUp(hit, down: mouseDown, armedMarquee: armedMarquee)
+      guard let item = mouseDown.item else { return .handled }
+      let releasedItem: FileSelectionNode?
+      if case let .file(row)? = hit { releasedItem = fileNode(at: row) } else { releasedItem = nil }
+      return .itemAction(.mouseUp(press: mouseDown.event, modifiers: mouseDown.modifiers, item: item, hit: hit, releasedItem: releasedItem))
     case .keyDown where event.keyCode == 53 && isMarqueeActive:
       endTracking(restoreSelection: true)
-      return true
+      return .handled
     default:
-      return false
+      return .ignored
     }
   }
 
   private func _HandleLeftMouseDown(_ event: NSEvent, in itemsView: FilePaneSurface) -> Bool {
-    guard let document = itemsView.document(at: event) else { return false }
+    guard let (document, hit) = itemsView.pointerTarget(at: event) else { return false }
+    if case .checkbox = hit { endTracking(); return false }
     endTracking()
     let point = document.convert(event.locationInWindow, from: nil)
     ExplorerFocus.keyboardVisible = false
     (document.window?.firstResponder as? NSView)?.needsDisplay = true
     document.window?.makeFirstResponder(document)
     let modifiers = FileSelectionModifiers(event.modifierFlags)
-    switch document.selectableItem(at: point) {
+    switch hit {
     case let .file(row):
       guard let node = fileNode(at: row) else { return false }
       let selected = IsSelected(node)
       let whitespace = document.isClickInItemWhitespace(at: point, row: row)
       let startsMarquee = !selected && whitespace
       let selectsOnRelease = modifiers == .toggle || (modifiers.isEmpty && selected)
-      mouseDown = MouseDown(event: event, row: row, modifiers: modifiers, selectsOnRelease: selectsOnRelease)
+      mouseDown = MouseDown(event: event, document: document, item: node, modifiers: modifiers, selectsOnRelease: selectsOnRelease)
       if startsMarquee { _CreateMarquee(at: event.locationInWindow, in: itemsView, document: document) }
       else if !selectsOnRelease { SelectionChange(at: row, modifiers: modifiers) }
     case .background:
-      mouseDown = MouseDown(event: event, row: nil, modifiers: modifiers, selectsOnRelease: false)
+      mouseDown = MouseDown(event: event, document: document, item: nil, modifiers: modifiers, selectsOnRelease: false)
       _CreateMarquee(at: event.locationInWindow, in: itemsView, document: document)
     case let .group(row):
       onGroupClick?(row)
       return true
+    case .checkbox:
+      return false
     }
     if let window = itemsView.window {
       resignObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
@@ -153,19 +174,13 @@ final class SelectionManager: NSObject, NSDraggingSource {
     return true
   }
 
-  private func _HandleLeftMouseUp(_ event: NSEvent, down: MouseDown, in itemsView: FilePaneSurface, armedMarquee: Bool) {
-    let hit = itemsView.document(at: event).map { document in
-      document.selectableItem(at: document.convert(event.locationInWindow, from: nil))
-    }
-    if armedMarquee, let row = down.row {
-      SelectionChange(at: row, modifiers: down.modifiers)
-    } else if down.row == nil, down.modifiers.isEmpty, case .background? = hit {
+  private func _HandleLeftMouseUp(_ hit: FilePaneHit?, down: MouseDown, armedMarquee: Bool) {
+    if armedMarquee, let item = down.item {
+      SelectionChange(.click(item, down.modifiers), affected: down.modifiers == .toggle ? topology.rowByNode[item].map { IndexSet(integer: $0) } : nil)
+    } else if down.item == nil, down.modifiers.isEmpty, case .background? = hit {
       SelectionChange(.clear)
     } else if down.selectsOnRelease, case let .file(row)? = hit {
       SelectionChange(at: row, modifiers: down.modifiers)
-    }
-    if let row = down.row, down.event.clickCount == 2, down.modifiers.isEmpty, case .file(row)? = hit {
-      openSelection?()
     }
   }
 
@@ -175,18 +190,24 @@ final class SelectionManager: NSObject, NSDraggingSource {
     return true
   }
 
-  func _HandleRightMouseDown(_ event: NSEvent, in document: any FilePaneDocument) {
-    if case let .file(row) = document.selectableItem(at: document.convert(event.locationInWindow, from: nil)),
-       let node = fileNode(at: row) {
+  func HandleContextMenu(_ event: NSEvent) -> InputResult {
+    guard let hit = itemsView?.pointerTarget(at: event)?.hit else { return .ignored }
+    if case .checkbox = hit { return .ignored }
+    endTracking()
+    _HandleRightMouseDown(hit)
+    return .itemAction(.contextMenu(event.locationInWindow))
+  }
+
+  private func _HandleRightMouseDown(_ hit: FilePaneHit) {
+    if case let .file(row) = hit, let node = fileNode(at: row) {
       if !IsSelected(node) { SelectionChange(at: row, modifiers: []) }
     } else {
       SelectionChange(.clear)
     }
-    showContext?(event.locationInWindow)
   }
 
   private func _CreateMarquee(at start: NSPoint, in itemsView: FilePaneSurface, document: any FilePaneDocument) {
-    marquee = NativeMarqueeSelection(host: document, start: start, drawingIn: itemsView,
+    marquee = NativeMarqueeSelection.StartMarquee(host: document, start: start, drawingIn: itemsView,
                                      visibleArea: { [weak itemsView] in itemsView?.fileViewport ?? .zero },
                                      hitTest: { [weak document] in document?.fileRows(intersecting: $0) ?? [] },
                                      itemsChanged: { [weak self] entered, exited in
@@ -200,7 +221,7 @@ final class SelectionManager: NSObject, NSDraggingSource {
   func endTracking(restoreSelection: Bool = false) {
     let refreshNames = isMarqueeActive
     mouseDown = nil
-    marquee?.endMarquee()
+    marquee?.EndMarquee()
     marquee = nil
     if let resignObserver {
       NotificationCenter.default.removeObserver(resignObserver)
@@ -212,23 +233,6 @@ final class SelectionManager: NSObject, NSDraggingSource {
     }
     selectionBeforeMarquee = nil
     if refreshNames { (itemsView?.scroll.documentView as? FileCollectionView)?.refreshExpandedNames() }
-  }
-
-  private func beginFileDrag(_ event: NSEvent, from document: NSView) {
-    guard let urls = draggedURLs?(), let first = urls.first else { return }
-    let items = urls.map { NSDraggingItem(pasteboardWriter: $0 as NSURL) }
-    let point = document.convert(event.locationInWindow, from: nil)
-    let frame = NSRect(x: point.x - 16, y: point.y - 16, width: 32, height: 32)
-    items[0].setDraggingFrame(frame, contents: NSWorkspace.shared.icon(forFile: first.path))
-    document.beginDraggingSession(with: items, event: event, source: self).draggingFormation = .stack
-  }
-
-  func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-    [.copy, .move]
-  }
-
-  func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-    finishedDragging?(operation)
   }
 
   deinit {

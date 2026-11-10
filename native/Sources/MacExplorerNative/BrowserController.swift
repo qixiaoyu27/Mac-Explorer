@@ -82,6 +82,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   private var syncingSortDescriptors = false
   private var syncingSelection = false
   let selectionManager = SelectionManager()
+  let itemActionsManager = ItemActionsManager()
   private var selectedRows = IndexSet()
   private var selectedHiddenEntries = IndexSet()
   private var selectedNetworkRows = IndexSet()
@@ -271,7 +272,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     rebuildTabs(); rebuildSidebar(); layoutChrome(); updateMode(persist: false)
     inputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .scrollWheel, .flagsChanged, .leftMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseDown]) { [weak self] event in
       guard let self else { return event }
-      if self.selectionManager.HandleInputEvent(event) { return nil }
+      if self.handleFileInput(self.selectionManager.HandleInputEvent(event)) { return nil }
       if event.type == .keyDown || event.type == .scrollWheel { return self.handleKey(event) }
       return event
     }
@@ -368,19 +369,32 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     moreButton.onPress = { [weak self] in guard let self else { return }; ExplorerMenu.present(self.moreMenu(), below: self.moreButton) }
     previewButton.onPress = { [weak self] in self?.togglePane("preview") }
   }
+  @discardableResult
+  private func handleFileInput(_ result: SelectionManager.InputResult) -> Bool {
+    switch result {
+    case .ignored: return false
+    case .handled: return true
+    case let .itemAction(input):
+      itemActionsManager.HandleInputEvent(input)
+      return true
+    }
+  }
+
   private func buildFileViews() {
     table.style = .plain; table.floatsGroupRows = false
     selectionManager.itemsView = content
     selectionManager.onSelectionChanged = { [weak self] in self?.selectionDidChange(affected: $0) }
     selectionManager.onGroupClick = { [weak self] in self?.toggleGroup(at: $0) }
-    selectionManager.openSelection = { [weak self] in self?.openSelected() }
-    selectionManager.showContext = { [weak self] in self?.showContext(at: $0) }
-    selectionManager.draggedURLs = { [weak self] in
-      guard let self else { return [] }
-      return self.selectedRows.compactMap { self.entryIndex(at: $0).map { self.entries[$0].url } }
-    }
-    selectionManager.finishedDragging = { [weak self] in self?.finishedDragging($0) }
+    itemActionsManager.openSelection = { [weak self] in self?.openSelected() }
+    itemActionsManager.showContext = { [weak self] in self?.showContext(at: $0) }
+    itemActionsManager.draggedURLs = { [weak self] in self?.selectedEntries().map(\.url) ?? [] }
+    itemActionsManager.finishedDragging = { [weak self] in self?.finishedDragging($0) }
     table.selectionManager = selectionManager; collection.selectionManager = selectionManager
+    table.showFileContextMenu = { [weak self] event in
+      guard let self else { return }
+      self.handleFileInput(self.selectionManager.HandleContextMenu(event))
+    }
+    collection.showFileContextMenu = table.showFileContextMenu
     table.isFileRow = { [weak self] in self?.entryIndex(at: $0) != nil }
     collection.isFileRow = table.isFileRow
     collection.listFileName = { [weak self] row in
@@ -732,9 +746,9 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
       placeMarker.frame = NSRect(x: 16, y: (after ? place.2 : row.frame.minY) - 1, width: max(0, sidebarDocument.bounds.width - 32), height: 2); placeMarker.isHidden = false
       return info.draggingPasteboard.availableType(from: [ExplorerSidebarRow.placeType]) != nil ? .move : .copy
     }
-    guard info.draggingPasteboard.availableType(from: [ExplorerSidebarRow.placeType]) == nil, target.isFileURL, !target.pathComponents.contains(".Trash"), !target.pathComponents.contains(".Trashes"),
-      info.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) else { return [] }
-    return NSEvent.modifierFlags.contains(.option) || !info.draggingSourceOperationMask.contains(.move) ? .copy : .move
+    guard info.draggingPasteboard.availableType(from: [ExplorerSidebarRow.placeType]) == nil,
+          !target.pathComponents.contains(".Trash") else { return [] }
+    return dropOperation(info, target: target, fromTab: true)
   }
   private func sidebarDrop(_ info: NSDraggingInfo, target: URL, row: ExplorerSidebarRow?, y: CGFloat, pinned: Bool) -> Bool {
     let operation = sidebarDrag(info, target: target, row: row, y: y, pinned: pinned)
@@ -1034,7 +1048,8 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
         selectionManager.replaceSelection(paths: requested, notify: false)
         pendingLocationState?.requestedPaths = nil
       }
-      selectionManager.onCollectionChanged(previous: previousTopology, regroupingFrom: requested == nil ? oldTopology : nil)
+      if requested == nil, let oldTopology { selectionManager.OnGroupByChanged(previous: oldTopology) }
+      selectionManager.OnCollectionEvent(previous: previousTopology)
     }
     table.reloadData(); collection.reloadData()
     content.install(document)
@@ -1154,8 +1169,8 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   func selectedEntries() -> [FileEntry] {
     var seen = Set<String>()
     if !selectedHiddenEntries.isEmpty {
-      return selectionManager.topology.items.compactMap { node in
-        guard selectionManager.IsSelected(node), let path = node.path, seen.insert(path).inserted,
+      return selectionManager.GetSelection().compactMap { node in
+        guard let path = node.path, seen.insert(path).inserted,
               let index = groupingIndexes[path] else { return nil }
         return entries[index]
       }
@@ -1667,12 +1682,14 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
       if !document.visibleRect.intersects(frame) { document.scrollToVisible(frame) }
       let visibleItem = document.convert(frame, to: content).intersection(viewport)
       if !visibleItem.isEmpty {
-        showContext(at: content.convert(NSPoint(x: visibleItem.minX + min(16, visibleItem.width / 2), y: visibleItem.midY), to: nil))
+        let point = content.convert(NSPoint(x: visibleItem.minX + min(16, visibleItem.width / 2), y: visibleItem.midY), to: nil)
+        itemActionsManager.HandleInputEvent(.contextMenu(point))
         return true
       }
     }
 
-    showContext(at: content.convert(NSPoint(x: viewport.minX + min(8, viewport.width / 2), y: viewport.minY + min(8, viewport.height / 2)), to: nil))
+    let point = content.convert(NSPoint(x: viewport.minX + min(8, viewport.width / 2), y: viewport.minY + min(8, viewport.height / 2)), to: nil)
+    itemActionsManager.HandleInputEvent(.contextMenu(point))
     return true
   }
 
@@ -2228,7 +2245,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     case "settings": showSettings()
     case "properties": showProperties()
     case "rename": renameSelected()
-    case "open": openSelected()
+    case "open": itemActionsManager.HandleInputEvent(.activate)
     case "copy": copySelection(cut: false)
     case "cut": copySelection(cut: true)
     case "paste": pasteFiles()
@@ -2313,25 +2330,43 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
           !urls.contains(where: { $0.standardizedFileURL.path == target.standardizedFileURL.path }) else { return [] }
     return NSEvent.modifierFlags.contains(.option) || !info.draggingSourceOperationMask.contains(.move) ? .copy : .move
   }
+
+  private func fileDropTarget(_ info: NSDraggingInfo, in document: any FilePaneDocument) -> (row: Int?, url: URL)? {
+    let point = info.draggingLocation
+    guard content.scroll.documentView === document, content.fileViewport.contains(content.convert(point, from: nil)) else { return nil }
+    if case let .file(row) = document.selectableItem(at: document.convert(point, from: nil)),
+       let index = entryIndex(at: row), entries[index].isDirectory, !entries[index].isPackage {
+      return (row, entries[index].url)
+    }
+    return (nil, directory)
+  }
+
   func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int, proposedDropOperation operation: NSTableView.DropOperation) -> NSDragOperation {
-    let target = entryIndex(at: row).flatMap { entries[$0].isDirectory && !entries[$0].isPackage ? entries[$0].url : nil }
-    tableView.setDropRow(target == nil ? -1 : row, dropOperation: .on)
-    return dropOperation(info, target: target ?? directory)
+    let target = fileDropTarget(info, in: table)
+    let result = target.map { dropOperation(info, target: $0.url) } ?? []
+    tableView.draggingDestinationFeedbackStyle = result.isEmpty ? .none : .regular
+    if !result.isEmpty { tableView.setDropRow(target?.row ?? -1, dropOperation: .on) }
+    return result
   }
   func tableView(_ tableView: NSTableView, acceptDrop info: NSDraggingInfo, row: Int, dropOperation operation: NSTableView.DropOperation) -> Bool {
-    let target = entryIndex(at: row).flatMap { entries[$0].isDirectory && !entries[$0].isPackage ? entries[$0].url : nil } ?? directory
-    return acceptFiles(info, at: target)
+    guard let target = fileDropTarget(info, in: table) else { return false }
+    return acceptFiles(info, at: target.url)
   }
   func collectionView(_ collectionView: NSCollectionView, validateDrop info: NSDraggingInfo, proposedIndexPath index: AutoreleasingUnsafeMutablePointer<NSIndexPath>, dropOperation operation: UnsafeMutablePointer<NSCollectionView.DropOperation>) -> NSDragOperation {
-    let row = index.pointee.item
-    let target = entryIndex(at: row).flatMap { entries[$0].isDirectory && !entries[$0].isPackage ? entries[$0].url : nil }
-    operation.pointee = target == nil ? .before : .on
-    return dropOperation(info, target: target ?? directory)
+    let target = fileDropTarget(info, in: collection)
+    let result = target.map { dropOperation(info, target: $0.url) } ?? []
+    let highlighted = result.isEmpty ? nil : target?.row.map { IndexPath(item: $0, section: 0) }
+    for item in collectionView.visibleItems() where item.highlightState == .asDropTarget && collectionView.indexPath(for: item) != highlighted {
+      item.highlightState = .none
+    }
+    guard !result.isEmpty else { return [] }
+    index.pointee = (highlighted ?? IndexPath(item: displayRows.count, section: 0)) as NSIndexPath
+    operation.pointee = highlighted == nil ? .before : .on
+    return result
   }
   func collectionView(_ collectionView: NSCollectionView, acceptDrop info: NSDraggingInfo, indexPath: IndexPath, dropOperation operation: NSCollectionView.DropOperation) -> Bool {
-    let row = indexPath.item
-    let target = operation == .on ? (entryIndex(at: row).flatMap { entries[$0].isDirectory && !entries[$0].isPackage ? entries[$0].url : nil } ?? directory) : directory
-    return acceptFiles(info, at: target)
+    guard let target = fileDropTarget(info, in: collection) else { return false }
+    return acceptFiles(info, at: target.url)
   }
   private func acceptFiles(_ info: NSDraggingInfo, at target: URL, fromTab: Bool = false) -> Bool {
     let operation = dropOperation(info, target: target, fromTab: fromTab)

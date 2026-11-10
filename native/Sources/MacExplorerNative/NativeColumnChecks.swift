@@ -127,7 +127,7 @@ enum NativeColumnChecks {
       let point = scroller.convert(NSPoint(x: scroller.bounds.midX, y: scroller.bounds.midY), to: nil)
       let event = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0,
                                      windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
-      try check(pane.document(at: event) == nil, "The \(scroller === h ? "bottom" : "right") track cannot start file marquee selection")
+      try check(pane.pointerTarget(at: event) == nil, "The \(scroller === h ? "bottom" : "right") track cannot start file marquee selection")
     }
     pane.scrollTo(origin)
     for scroller in [h, v] { scroller.mouseExited(with: hoverEvent(for: scroller)) }

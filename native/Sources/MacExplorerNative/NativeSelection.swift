@@ -32,8 +32,15 @@ final class NativeMarqueeSelection {
 
   var isDragging: Bool { timer != nil }
 
-  init(host: NSView, start: NSPoint, drawingIn surface: NSView, visibleArea: @escaping () -> NSRect,
-       hitTest: @escaping (NSRect) -> IndexSet, itemsChanged: @escaping (IndexSet, IndexSet) -> Void) {
+  static func StartMarquee(host: NSView, start: NSPoint, drawingIn surface: NSView,
+                           visibleArea: @escaping () -> NSRect, hitTest: @escaping (NSRect) -> IndexSet,
+                           itemsChanged: @escaping (IndexSet, IndexSet) -> Void) -> NativeMarqueeSelection {
+    NativeMarqueeSelection(host: host, start: start, drawingIn: surface, visibleArea: visibleArea,
+                           hitTest: hitTest, itemsChanged: itemsChanged)
+  }
+
+  private init(host: NSView, start: NSPoint, drawingIn surface: NSView, visibleArea: @escaping () -> NSRect,
+               hitTest: @escaping (NSRect) -> IndexSet, itemsChanged: @escaping (IndexSet, IndexSet) -> Void) {
     self.host = host
     drawingSurface = surface
     self.visibleArea = visibleArea
@@ -43,26 +50,32 @@ final class NativeMarqueeSelection {
     self.start = host.convert(start, from: nil)
   }
 
-  func beginDragging() {
-    guard let drawingSurface else { return }
-    overlay.frame = visibleArea()
-    drawingSurface.addSubview(overlay, positioned: .above, relativeTo: nil)
+  func OnMouseMoved(to point: NSPoint, crossedThreshold: Bool) {
+    if !isDragging {
+      guard crossedThreshold, let drawingSurface else { return }
+      overlay.frame = visibleArea()
+      drawingSurface.addSubview(overlay, positioned: .above, relativeTo: nil)
+      _SetScrollTimers()
+    }
+    pointer = point
+    update()
+  }
+
+  private func _SetScrollTimers() {
     let timer = Timer(timeInterval: 1 / 60, repeats: true) { [weak self] _ in self?.update() }
     self.timer = timer
     RunLoop.main.add(timer, forMode: .common)
-  }
-
-  func setEndpoint(_ point: NSPoint) {
-    pointer = point
-    update()
   }
 
   private func update() {
     guard let host, let surface = drawingSurface, let scroll = host.enclosingScrollView else { return }
     let area = visibleArea()
     guard !area.isEmpty else { return }
-    let viewport = host.convert(area, from: surface)
-    var point = host.convert(pointer, from: nil)
+    scrollAtEdge(in: scroll, pointer: host.convert(pointer, from: nil), viewport: host.convert(area, from: surface))
+    _SetNewEndpoint(in: host, surface: surface)
+  }
+
+  private func scrollAtEdge(in scroll: NSScrollView, pointer point: NSPoint, viewport: NSRect) {
     let x = min(viewport.maxX, max(viewport.minX, point.x)), y = min(viewport.maxY, max(viewport.minY, point.y))
     func speed(_ value: CGFloat, _ minimum: CGFloat, _ maximum: CGFloat) -> CGFloat { value < minimum + 24 ? -12 : value > maximum - 24 ? 12 : 0 }
     let dx = speed(x, viewport.minX, viewport.maxX), dy = speed(y, viewport.minY, viewport.maxY)
@@ -74,8 +87,11 @@ final class NativeMarqueeSelection {
         scroll.reflectScrolledClipView(clip)
       }
     }
-    point = host.convert(pointer, from: nil)
-    let visible = host.convert(visibleArea(), from: surface)
+  }
+
+  private func _SetNewEndpoint(in host: NSView, surface: NSView) {
+    var point = host.convert(pointer, from: nil)
+    let area = visibleArea(), visible = host.convert(area, from: surface)
     point.x = max(visible.minX, min(visible.maxX, point.x)); point.y = max(visible.minY, min(visible.maxY, point.y))
     let rect = NSRect(x: min(start.x, point.x), y: min(start.y, point.y), width: abs(start.x - point.x), height: abs(start.y - point.y))
     guard previousRectangle != rect else { return }
@@ -83,19 +99,23 @@ final class NativeMarqueeSelection {
     overlay.frame = area
     overlay.rectangle = overlay.convert(rect, from: host)
     overlay.needsDisplay = true
+    _GetItemsInMarquee(rect)
+  }
+
+  private func _GetItemsInMarquee(_ rect: NSRect) {
     let hits = hitTest(rect)
     let entered = hits.subtracting(previousHits), exited = previousHits.subtracting(hits)
     previousHits = hits
     if !entered.isEmpty || !exited.isEmpty { itemsChanged(entered, exited) }
   }
 
-  func endMarquee() {
+  func EndMarquee() {
     timer?.invalidate()
     timer = nil
     overlay.removeFromSuperview()
   }
 
-  deinit { endMarquee() }
+  deinit { EndMarquee() }
 }
 
 private final class MarqueeOverlay: NSView {
@@ -199,7 +219,7 @@ enum NativeSelectionChecks {
     return checks
   }
 
-  static func runFileMarquee(browser: BrowserController, window: NSWindow) throws -> [String] {
+  static func runFileMarquee(browser: BrowserController, window: NSWindow) async throws -> [String] {
     let selection = browser.selectedPaths, mode = browser.mode
     let collection = browser.collection, table = browser.table
     let pane = browser.content, scroll = browser.fileScroll, clip = scroll.contentView
@@ -210,6 +230,12 @@ enum NativeSelectionChecks {
       browser.selectedPaths = selection
     }
     window.contentView?.layoutSubtreeIfNeeded()
+    pane.scrollTo(.zero)
+    window.makeKeyAndOrderFront(nil)
+    if #available(macOS 14, *) { NSApp.activate() }
+    else { NSApp.activate(ignoringOtherApps: true) }
+    try await NativeSmoke.until { window.isKeyWindow }
+    window.makeFirstResponder(collection)
     guard browser.fileScroll === scroll, scroll.contentView === clip, scroll.documentView === collection,
           let header = table.headerView, !header.isDescendant(of: scroll) else {
       throw NativeSmoke.Failure(description: "List installs its layout in the shared viewport without a table header")
@@ -246,11 +272,17 @@ enum NativeSelectionChecks {
       let inside = NSPoint(x: insideX, y: c.midY)
       let samplePoint = NSPoint(x: (startX + laneX) / 2, y: (a.midY + c.midY) / 2)
       let before = sample(at: samplePoint, in: collection)
-      mouseDown(at: start, in: collection)
+      let press = event(.leftMouseDown, at: start, in: collection)
+      let target = pane.pointerTarget(at: press)
+      NSApp.sendEvent(press)
+      guard browser.selectionManager.isMarqueeActive else {
+        throw NativeSmoke.Failure(description: "List side lane at x=\(startX) did not arm marquee (key window: \(window.isKeyWindow), file target: \(String(describing: target?.hit)), viewport: \(pane.fileViewport), press: \(pane.convert(press.locationInWindow, from: nil)))")
+      }
       NSApp.sendEvent(event(.leftMouseDragged, at: lane, in: collection))
+      let during = sample(at: samplePoint, in: collection)
       guard browser.selectionManager.isMarqueeActive, browser.selectedPaths.isEmpty,
-            let before, let during = sample(at: samplePoint, in: collection), during != before else {
-        throw NativeSmoke.Failure(description: "List drag in a side lane draws a box without selecting files")
+            let before, let during, during != before else {
+        throw NativeSmoke.Failure(description: "List side lane at x=\(startX): marquee=\(browser.selectionManager.isMarqueeActive), selected=\(browser.selectedPaths.count), box changed sample=\(during != before)")
       }
       NSApp.sendEvent(event(.leftMouseDragged, at: inside, in: collection))
       guard collection.selectionIndexPaths == hits else {
@@ -291,7 +323,7 @@ enum NativeSelectionChecks {
     guard collection.selectionIndexPaths == [third] else {
       throw NativeSmoke.Failure(description: "Releasing a click on a selected file narrows the selection")
     }
-    let manager = browser.selectionManager
+    let manager = browser.itemActionsManager
     let dragURLs = manager.draggedURLs
     var dragSelection: Set<IndexPath> = []
     manager.draggedURLs = { dragSelection = collection.selectionIndexPaths; return [] }
@@ -301,7 +333,7 @@ enum NativeSelectionChecks {
     NSApp.sendEvent(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
                                   windowNumber: window.windowNumber, context: nil, characters: "\u{1b}",
                                   charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!)
-    guard !manager.isMarqueeActive, collection.selectionIndexPaths.isEmpty else {
+    guard !browser.selectionManager.isMarqueeActive, collection.selectionIndexPaths.isEmpty else {
       throw NativeSmoke.Failure(description: "Escape during List marquee restores the selection before mouse down")
     }
     let firstIcon = NSPoint(x: a.minX + 38, y: a.midY)
@@ -462,6 +494,29 @@ enum NativeSelectionChecks {
             "Details marquee extends selection while edge scrolling and stays out of the header"]
   }
 
+  static func runAppKitFileDrag(window: NSWindow, urls: [URL], expectedPaths: Set<String>) throws -> String {
+    guard let rootView = window.contentView, urls.count > 1 else {
+      throw NativeSmoke.Failure(description: "The native drag fixture requires multiple selected files")
+    }
+    let source = FileDragSessionFixture(frame: NSRect(x: 0, y: 0, width: 64, height: 64))
+    rootView.addSubview(source)
+    defer { source.removeFromSuperview() }
+    let event = NSEvent.mouseEvent(with: .leftMouseDragged, location: source.convert(NSPoint(x: 32, y: 32), to: nil),
+                                   modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                   windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+    let fileActions = ItemActionsManager()
+    fileActions.draggedURLs = { urls }
+    fileActions.HandleInputEvent(.drag(event, document: source))
+    let release = NSEvent.mouseEvent(with: .leftMouseUp, location: event.locationInWindow,
+                                     modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                     windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 0)!
+    NSApp.postEvent(release, atStart: false)
+    guard source.draggedURLs.count == expectedPaths.count, Set(source.draggedURLs.map(\.path)) == expectedPaths else {
+      throw NativeSmoke.Failure(description: "A real AppKit drag session exports visible and collapsed selected files")
+    }
+    return "A real AppKit drag session exports visible and collapsed selected files"
+  }
+
   static func run() throws -> [String] {
     var checks: [String] = []
     func check(_ value: Bool, _ description: String) throws {
@@ -522,22 +577,21 @@ enum NativeSelectionChecks {
     collection.register(SelectionFixtureItem.self, forItemWithIdentifier: .init("fixture")); scroll.documentView = collection; collection.reloadData(); collection.layoutSubtreeIfNeeded(); layout.prepare()
     window.makeFirstResponder(collection)
     var selected = IndexSet()
-    let edge = NativeMarqueeSelection(host: collection, start: collection.convert(NSPoint(x: 1, y: 1), to: nil),
+    let edge = NativeMarqueeSelection.StartMarquee(host: collection, start: collection.convert(NSPoint(x: 1, y: 1), to: nil),
                                       drawingIn: scroll.contentView, visibleArea: { scroll.contentView.bounds },
                                       hitTest: { rect in
       IndexSet(layout.layoutAttributesForElements(in: rect).compactMap { $0.indexPath?.item })
     }, itemsChanged: { entered, exited in
       selected.subtract(exited); selected.formUnion(entered)
     })
-    edge.beginDragging()
     let height = collection.visibleRect.height
     let pointer = collection.convert(NSPoint(x: 250, y: collection.visibleRect.maxY - 1), to: nil)
-    for _ in 0..<30 { edge.setEndpoint(pointer) }
+    for _ in 0..<30 { edge.OnMouseMoved(to: pointer, crossedThreshold: true) }
     try check(collection.visibleRect.minY > 0 && selected.contains(where: {
       layout.layoutAttributesForItem(at: IndexPath(item: $0, section: 0)).map { $0.frame.minY > height } ?? false
     }), "Edge scrolling extends marquee hits beyond the initial viewport")
     try check(collectionData.created < 200, "Marquee layout queries avoid instantiating all 10000 item views")
-    edge.endMarquee()
+    edge.EndMarquee()
     let longSurface = ItemSurface(frame: NSRect(x: 20, y: collection.visibleRect.minY + 20, width: 110, height: 122)), name = label(String(repeating: "Long file name ", count: 20))
     name.identifier = .init("fixture-name"); name.maximumNumberOfLines = 2; name.alignment = .center; name.frame = NSRect(x: 5, y: 78, width: 100, height: 36); longSurface.addSubview(name); collection.addSubview(longSurface); longSurface.selected = true; longSurface.layoutSubtreeIfNeeded()
     try check(collection.subviews.contains(where: { $0 is NativeExpandedNameView }), "Selected icon names expand without changing layout hit frames")
@@ -549,6 +603,16 @@ enum NativeSelectionChecks {
     try check(!collection.subviews.contains(where: { $0 is NativeExpandedNameView }), "Expanded labels disappear during inline editing")
     checks += try NativeInputNavigationChecks.run(window: window, content: collection)
     return checks
+  }
+}
+
+private final class FileDragSessionFixture: NSView {
+  private(set) var draggedURLs: [URL] = []
+
+  override func beginDraggingSession(with items: [NSDraggingItem], event: NSEvent, source: any NSDraggingSource) -> NSDraggingSession {
+    let session = super.beginDraggingSession(with: items, event: event, source: source)
+    draggedURLs = session.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+    return session
   }
 }
 

@@ -43,6 +43,7 @@ enum FilePaneHit {
   case background
   case file(Int)
   case group(Int)
+  case checkbox
 }
 
 protocol FilePaneDocument: AnyObject where Self: NSView {
@@ -366,7 +367,7 @@ final class FilePaneSurface: SurfaceView {
     return area.intersection(bounds)
   }
 
-  func document(at event: NSEvent) -> (any FilePaneDocument)? {
+  func pointerTarget(at event: NSEvent) -> (document: any FilePaneDocument, hit: FilePaneHit)? {
     let point = convert(event.locationInWindow, from: nil)
     guard let window, event.window === window, window.isKeyWindow, !scroll.isHidden, fileViewport.contains(point),
           NativeSelection.canHandle(self), let document = scroll.documentView as? any FilePaneDocument,
@@ -375,10 +376,11 @@ final class FilePaneSurface: SurfaceView {
           hit === scroll || hit.isDescendant(of: scroll) else { return nil }
     var target: NSView? = hit
     while let candidate = target, candidate !== scroll {
+      if candidate is ExplorerCheckbox { return (document, .checkbox) }
       if candidate is NSScroller || candidate is NSTableHeaderView || candidate is NSButton { return nil }
       target = candidate.superview
     }
-    return document
+    return (document, document.selectableItem(at: document.convert(event.locationInWindow, from: nil)))
   }
 }
 
@@ -652,6 +654,7 @@ final class FileTableView: NSTableView, FilePaneDocument {
     super.selectRowIndexes(indexes.subtracting(groupHeaderRows), byExtendingSelection: extend)
   }
   var previewSelection: (() -> Void)?; var renameSelection: (() -> Void)?; var trashSelection: (() -> Void)?
+  var showFileContextMenu: ((NSEvent) -> Void)?
   weak var selectionManager: SelectionManager?
   private func hitsFileContent(at point: NSPoint, row: Int) -> Bool {
     let column = column(at: point)
@@ -686,7 +689,7 @@ final class FileTableView: NSTableView, FilePaneDocument {
   }
 
   override func menu(for event: NSEvent) -> NSMenu? {
-    selectionManager?._HandleRightMouseDown(event, in: self)
+    showFileContextMenu?(event)
     return nil
   }
   override func keyDown(with event: NSEvent) {
@@ -700,7 +703,7 @@ final class FileTableView: NSTableView, FilePaneDocument {
     if [115, 119, 125, 126].contains(event.keyCode), event.modifierFlags.intersection([.command, .option]).isEmpty, numberOfRows > 0 {
       let previous = selectionManager.focusedRow(fallback: selectedRowIndexes.last) ?? -1
       guard let next = nextFileRow(key: event.keyCode, previous: previous, count: numberOfRows, accepts: isFileRow) else { return }
-      selectionManager.SelectionChange(at: next, modifiers: flags, keyboard: true)
+      selectionManager.UserMovedFocusWithKeyboard(to: next, modifiers: flags)
       scrollRowToVisible(next)
       return
     }
@@ -730,10 +733,11 @@ final class FileCollectionView: NSCollectionView, FilePaneDocument {
   var listFileName: (Int) -> String? = { _ in nil }
   var listCheckboxesEnabled: () -> Bool = { false }
   var previewSelection: (() -> Void)?; var renameSelection: (() -> Void)?; var trashSelection: (() -> Void)?
+  var showFileContextMenu: ((NSEvent) -> Void)?
   weak var selectionManager: SelectionManager?
   func refreshExpandedNames() { for item in visibleItems() { item.view.needsLayout = true } }
   override func menu(for event: NSEvent) -> NSMenu? {
-    selectionManager?._HandleRightMouseDown(event, in: self)
+    showFileContextMenu?(event)
     return nil
   }
 
@@ -755,7 +759,7 @@ final class FileCollectionView: NSCollectionView, FilePaneDocument {
         next = (collectionViewLayout as? ExplorerCollectionLayout)?.neighbor(of: previous, key: event.keyCode, accepts: isFileRow)
       }
       guard let next else { return }
-      selectionManager.SelectionChange(at: next, modifiers: flags, keyboard: true)
+      selectionManager.UserMovedFocusWithKeyboard(to: next, modifiers: flags)
       scrollToItems(at: [IndexPath(item: next, section: 0)], scrollPosition: .nearestHorizontalEdge.union(.nearestVerticalEdge))
       return
     }
@@ -910,7 +914,10 @@ final class ExplorerCollectionLayout: NSCollectionViewLayout {
   }
   override func layoutAttributesForDropTarget(at point: NSPoint) -> NSCollectionViewLayoutAttributes? {
     guard NSRect(origin: .zero, size: contentSize).contains(point) else { return nil }
-    if !groupHeaderRows.isEmpty { return layoutAttributesForElements(in: NSRect(x: point.x, y: point.y, width: 1, height: 1)).first { $0.frame.contains(point) } }
+    if !groupHeaderRows.isEmpty {
+      return layoutAttributesForElements(in: NSRect(x: point.x, y: point.y, width: 1, height: 1)).first { $0.frame.contains(point) }
+        ?? layoutAttributesForInterItemGap(before: IndexPath(item: count, section: 0))
+    }
     let column = max(0, Int((point.x - inset.width) / (cell.width + gap.width)))
     let row = max(0, Int((point.y - inset.height) / (cell.height + gap.height)))
     let item = mode == .list ? column * rows + row : row * columns + column
@@ -920,13 +927,7 @@ final class ExplorerCollectionLayout: NSCollectionViewLayout {
   override func layoutAttributesForInterItemGap(before indexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {
     guard indexPath.section == 0, (0...count).contains(indexPath.item) else { return nil }
     let value = NSCollectionViewLayoutAttributes(forInterItemGapBefore: indexPath)
-    let item = layoutAttributesForItem(at: indexPath) ?? layoutAttributesForItem(at: IndexPath(item: count - 1, section: 0))
-    let frame = item?.frame ?? NSRect(origin: NSPoint(x: inset.width, y: inset.height), size: cell)
-    if mode == .content {
-      value.frame = NSRect(x: frame.minX, y: indexPath.item < count || count == 0 ? frame.minY : frame.maxY, width: frame.width, height: 3)
-    } else {
-      value.frame = NSRect(x: indexPath.item < count || count == 0 ? frame.minX : frame.maxX, y: frame.minY, width: 3, height: frame.height)
-    }
+    value.isHidden = true
     return value
   }
   func neighbor(of index: Int, key: UInt16, accepts: (Int) -> Bool) -> Int? {
