@@ -39,18 +39,26 @@ struct NativeFileFailure {
 
   /// Cached mount information only; no network metadata reads or path-name guesses.
   static func networkLocation(_ url: URL) -> Bool? {
-    guard url.isFileURL else { return url.scheme?.lowercased() == "smb" ? true : nil }
+    networkLocationSnapshot()(url)
+  }
+
+  static func networkLocationSnapshot() -> (URL) -> Bool? {
     var buffer: UnsafeMutablePointer<statfs>?
     let count = getmntinfo_r_np(&buffer, MNT_NOWAIT)
-    guard count > 0, let buffer else { return nil }; defer { Darwin.free(buffer) }
-    var bestLength = -1, result: Bool?
-    for index in 0..<Int(count) {
-      var mount = buffer[index]
-      let path = withUnsafePointer(to: &mount.f_mntonname) { $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) } }
-      if (url.path == path || url.path.hasPrefix(path == "/" ? "/" : path + "/")), path.count > bestLength {
-        bestLength = path.count; result = mount.f_flags & UInt32(MNT_LOCAL) == 0
+    var mounts: [(path: String, network: Bool)] = []
+    if count > 0, let buffer {
+      defer { Darwin.free(buffer) }
+      for index in 0..<Int(count) {
+        var mount = buffer[index]
+        let path = withUnsafePointer(to: &mount.f_mntonname) { $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) } }
+        mounts.append((path, mount.f_flags & UInt32(MNT_LOCAL) == 0))
       }
     }
-    return result
+    mounts.sort { $0.path.count > $1.path.count }
+    return { url in
+      guard url.isFileURL else { return url.scheme?.lowercased() == "smb" ? true : nil }
+      let path = url.path
+      return mounts.first { path == $0.path || path.hasPrefix($0.path == "/" ? "/" : $0.path + "/") }?.network
+    }
   }
 }

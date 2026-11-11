@@ -54,7 +54,7 @@ import ExplorerCore
       window.contentView?.layoutSubtreeIfNeeded(); browser.collection.layoutSubtreeIfNeeded()
       if mode == .details { _ = browser.table.view(atColumn: 0, row: 0, makeIfNecessary: true) }
       try await until { IconLoader.shared.isIdle }
-      let scroll = mode == .details ? browser.tableScroll : browser.collectionScroll
+      let scroll = browser.fileScroll
       browser.selectedPaths = [url.path]
       let origin = scroll.contentView.bounds.origin, loads = IconLoader.shared.loads, snapshot = browser.snapshot
       try await handler(NSWorkspace.shared.urlForApplication(toOpen: url) == textEdit ? other : textEdit)

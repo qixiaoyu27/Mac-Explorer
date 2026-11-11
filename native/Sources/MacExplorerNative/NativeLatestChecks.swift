@@ -127,25 +127,28 @@ enum NativeLatestChecks {
     try await until { !first.collection.visibleItems().isEmpty && !second.collection.visibleItems().isEmpty }
     func checkHover(_ resolve: () -> (NSView, ExplorerCheckbox)) throws {
       var (view, checkbox) = resolve()
-      guard let event = NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: view.window?.windowNumber ?? 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil) else { throw NativeSmoke.Failure(description: "Cannot create checkbox hover event") }
-      view.mouseExited(with: event)
+      func hover(_ value: Bool) {
+        (view as? ItemSurface)?.hovered = value
+        (view as? FileRowView)?.hovered = value
+      }
+      hover(false)
       try expect(checkbox.isHidden == (checkbox.state != .on), "Only selected item checkboxes remain visible without hover")
       let frame = checkbox.frame
-      view.mouseEntered(with: event)
+      hover(true)
       try expect(!checkbox.isHidden && checkbox.frame == frame, "Hover reveals the item checkbox without shifting layout")
       if checkbox.state == .on { checkbox.performClick(nil); (view, checkbox) = resolve() }
       checkbox.performClick(nil)
       (view, checkbox) = resolve()
       try expect(checkbox.state == .on, "Hovered checkbox still selects the item")
-      view.mouseExited(with: event)
+      hover(false)
       try expect(!checkbox.isHidden && checkbox.state == .on, "Leaving keeps a checked checkbox visible and preserves selection")
       checkbox.state = .off
       try expect(checkbox.isHidden && checkbox.state == .off, "Programmatic deselection without hover hides the checkbox immediately")
       checkbox.state = .on
       try expect(!checkbox.isHidden, "Programmatic selection reveals the checkbox without hover")
-      checkbox.available = false; view.mouseEntered(with: event)
+      checkbox.available = false; hover(true)
       try expect(checkbox.isHidden, "Disabled item checkboxes stay hidden during hover")
-      view.mouseExited(with: event)
+      hover(false)
     }
     for browser in [first, second] {
       let items = browser.collection.visibleItems().compactMap { $0 as? IconItem }

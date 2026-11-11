@@ -42,6 +42,12 @@ enum NativeSmoke {
         try write(["passed": true, "checks": checks], to: report)
         NSApp.terminate(nil); return
       }
+      if ProcessInfo.processInfo.arguments.contains("--smoke-context-menu-input") {
+        try await until { !browser.loading && browser.entries.count >= 3 }
+        checks += try NativeSelectionChecks.runContextMenuInput(browser: browser, window: window)
+        try write(["passed": true, "checks": checks], to: report)
+        NSApp.terminate(nil); return
+      }
       if ProcessInfo.processInfo.arguments.contains("--smoke-vcs-edit") {
         checks += try await NativeVCSEditingChecks.run()
         try write(["passed": true, "checks": checks], to: report)
@@ -84,6 +90,18 @@ enum NativeSmoke {
       try expect(IconLoader.shared.loads < 150, "initial icon requests are bounded by visible rows")
       try expect(browser.entries.first?.isDirectory == true, "folders precede files")
       try expect(!browser.entries.contains { $0.name == ".hidden-fixture" }, "hidden entries excluded initially")
+      window.makeFirstResponder(browser.table)
+      browser.table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+      func shiftArrow(_ code: UInt16) {
+        guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .shift,
+                                          timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                                          characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: code) else { return }
+        browser.table.keyDown(with: event)
+      }
+      shiftArrow(125); shiftArrow(125)
+      try expect(browser.table.selectedRowIndexes == [0, 1, 2], "Browser Shift Down projects the shared range")
+      shiftArrow(126)
+      try expect(browser.table.selectedRowIndexes == [0, 1], "Browser Shift Up contracts the shared range")
       browser.table.selectRowIndexes(IndexSet([0, 1]), byExtendingSelection: false)
       try expect(browser.selectedPaths.count == 2, "native table multi-selection updates the model")
       let selected = browser.selectedPaths
@@ -91,8 +109,32 @@ enum NativeSmoke {
       try await until { !browser.collection.visibleItems().isEmpty && IconLoader.shared.isIdle }
       try expect(browser.selectedPaths == selected && browser.collection.selectionIndexPaths.count == 2, "selection survives details-to-icons switch")
       try expect(browser.collection.visibleItems().count < 150, "collection reuses visible items")
+      func shiftIconArrow(_ code: UInt16) {
+        guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .shift,
+                                          timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                                          characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: code) else { return }
+        browser.collection.keyDown(with: event)
+      }
+      shiftIconArrow(124)
+      try expect(browser.collection.selectionIndexPaths.map(\.item).sorted() == [0, 1, 2], "Icon Shift Right extends the anchor inherited from Details")
+      shiftIconArrow(123)
+      try expect(browser.selectedPaths == selected, "Icon Shift Left contracts to the original selection")
+      browser.setView(.details); browser.setGrouping(.kind)
+      if let groupRow = browser.displayRows.firstIndex(where: { $0.group != nil }) {
+        browser.toggleGroup(at: groupRow)
+        try expect(browser.selectedPaths == selected && browser.table.selectedRowIndexes.isEmpty, "Collapsed selection remains available to file commands")
+        browser.selectAllFiles()
+        try expect(browser.selectedEntries().count == 10_003 && browser.table.selectedRowIndexes.count < 10_003, "Select All includes collapsed files without projecting hidden rows")
+      } else { throw Failure(description: "Grouping creates headers for the selection fixture") }
+      browser.setGrouping(.none); browser.selectedPaths = selected; browser.setView(.icons)
+      checks += try NativeSelectionChecks.runFileMarquee(browser: browser, window: window)
+      if ProcessInfo.processInfo.arguments.contains("--smoke-selection") {
+        checks += try NativeSelectionChecks.run()
+        try write(["passed": true, "checks": checks, "metrics": metrics], to: report)
+        NSApp.terminate(nil); return
+      }
       let menu = browser.viewMenu()
-      try expect(menu.map(\.title) == ["超大图标", "大图标", "中图标", "小图标", "列表", "详细信息", "平铺", "内容", "列", "详细信息窗格", "预览窗格", "显示", "应用到所有文件夹"], "View menu preserves layout order and includes column customization")
+      try expect(menu.map(\.title) == ["超大图标", "大图标", "中图标", "小图标", "列表", "详细信息", "平铺", "内容", "列", "详细信息窗格", "预览窗格", "显示", "分组依据", "应用到所有文件夹"], "View menu preserves layout order and includes column customization")
       for index in [0, 1, 2, 3, 4, 6, 7] {
         menu[index].action?()
         window.contentView?.layoutSubtreeIfNeeded()

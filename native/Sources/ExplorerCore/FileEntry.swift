@@ -9,6 +9,7 @@ public struct FileEntry: Identifiable, Hashable, Sendable {
   public let size: Int64
   public let modified: Date?
   public let created: Date?
+  public let resourceIdentifier: Data?
   public var vcsMark: String? = nil
   public let isHidden: Bool
 
@@ -33,7 +34,8 @@ public struct FileEntry: Identifiable, Hashable, Sendable {
     size: Int64,
     modified: Date?,
     isHidden: Bool,
-    created: Date? = nil
+    created: Date? = nil,
+    resourceIdentifier: Data? = nil
   ) {
     self.url = url
     self.name = name
@@ -43,6 +45,7 @@ public struct FileEntry: Identifiable, Hashable, Sendable {
     self.size = size
     self.modified = modified
     self.created = created
+    self.resourceIdentifier = resourceIdentifier
     self.isHidden = isHidden
   }
 }

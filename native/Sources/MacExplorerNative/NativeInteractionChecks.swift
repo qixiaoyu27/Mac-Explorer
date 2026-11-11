@@ -116,12 +116,12 @@ enum NativeInteractionChecks {
     window.contentView?.layoutSubtreeIfNeeded()
     // Compare the refresh with the settled viewport immediately before the external
     // mutation, rather than an earlier pending AppKit selection/scroll adjustment.
-    let scroll = browser.tableScroll.contentView.bounds.origin
+    let scroll = browser.fileScroll.contentView.bounds.origin
     try check(browser.selectedPaths == selection && !selection.isEmpty && scroll.y > 100, "External refresh fixture starts with a settled nonempty selection and scrolled viewport")
     try Data("external".utf8).write(to: docs.appendingPathComponent("zz-external.txt"))
     try await until { browser.entries.contains { $0.name == "zz-external.txt" } }
-    guard browser.selectedPaths == selection && abs(browser.tableScroll.contentView.bounds.origin.y - scroll.y) < 1 else {
-      throw NativeSmoke.Failure(description: "External create refreshes in place without losing selection or scroll; before=\(scroll), after=\(browser.tableScroll.contentView.bounds.origin), selectedBefore=\(selection), selectedAfter=\(browser.selectedPaths)")
+    guard browser.selectedPaths == selection && abs(browser.fileScroll.contentView.bounds.origin.y - scroll.y) < 1 else {
+      throw NativeSmoke.Failure(description: "External create refreshes in place without losing selection or scroll; before=\(scroll), after=\(browser.fileScroll.contentView.bounds.origin), selectedBefore=\(selection), selectedAfter=\(browser.selectedPaths)")
     }
     try check(true, "External create refreshes in place without losing selection or scroll")
     let renaming = browser.entries.firstIndex { $0.id == selection.first }!
@@ -157,15 +157,22 @@ enum NativeInteractionChecks {
     try await until { browser.entries.contains { $0.name == "zz-modal.txt" } }
     try fm.removeItem(at: docs.appendingPathComponent("zz-modal.txt"))
     try await until { !browser.entries.contains { $0.name == "zz-modal.txt" } }
-    try fm.moveItem(at: docs.appendingPathComponent("zz-external.txt"), to: docs.appendingPathComponent("zz-renamed.txt"))
+    let external = docs.appendingPathComponent("zz-external.txt"), renamed = docs.appendingPathComponent("zz-renamed.txt")
+    browser.selectedPaths = [external.path]
+    try fm.moveItem(at: external, to: renamed)
     try await until { browser.entries.contains { $0.name == "zz-renamed.txt" } && !browser.entries.contains { $0.name == "zz-external.txt" } }
-    try fm.removeItem(at: docs.appendingPathComponent("zz-renamed.txt"))
+    try check(browser.selectedPaths == [renamed.path], "External rename transfers selection to the same file at its new path")
+    let oldIdentity = browser.entries.first { $0.id == renamed.path }?.resourceIdentifier
+    try Data("atomic replacement".utf8).write(to: renamed, options: .atomic)
+    try await until { browser.entries.contains { $0.id == renamed.path && $0.resourceIdentifier != oldIdentity } }
+    try check(browser.selectedPaths.isEmpty, "Same-path atomic replacement does not inherit an explicit file selection")
+    try fm.removeItem(at: renamed)
     try await until { !browser.entries.contains { $0.name == "zz-renamed.txt" } }
     try check(true, "External rename and removal refresh the native list")
     browser.openTab(at: extra); browser.navigate(to: docs)
     try await until { !browser.loading && browser.entries.count == 121 }
     browser.table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-    let tab = browser.tabs[browser.activeTab]
+    let tab = browser.tabs[browser.activeTab], tabSelection = browser.selectedPaths
     let beforeWindows = app.browserWindows.count
     guard let tabView = browser.tabsDocument.subviews.compactMap({ $0 as? ExplorerTabView }).last else { throw NativeSmoke.Failure(description: "No tab view") }
     let downPoint = tabView.convert(NSPoint(x: 50, y: 18), to: nil), dragPoint = browser.view.convert(NSPoint(x: 360, y: 105), to: nil)
@@ -175,7 +182,7 @@ enum NativeInteractionChecks {
     guard let detachedWindow = app.browserWindows.last, let detached = detachedWindow.contentViewController as? BrowserController else { throw NativeSmoke.Failure(description: "No detached window") }
     windows.append(detachedWindow)
     try await until { !detached.loading && detached.snapshot != nil }
-    try check(detached.tabs[0].id == tab.id && detached.tabs[0].history == tab.history && detached.tabs[0].index == tab.index && detached.selectedPaths == tab.selectedPaths, "Dragging a tab out preserves its identity, history, and selection")
+    try check(detached.tabs[0].id == tab.id && detached.tabs[0].history == tab.history && detached.tabs[0].index == tab.index && detached.selectedPaths == tabSelection, "Dragging a tab out preserves its identity, history, and selection")
     try check(browser.tabs.count == 1 && window.isVisible, "Tab detach leaves the source window and remaining tab intact")
     detached.back()
     try await until { !detached.loading && detached.directory.path == extra.path }

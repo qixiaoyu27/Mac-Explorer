@@ -92,9 +92,9 @@ enum NativeColumnChecks {
     for pane in ["", "preview", "details"] {
       browser.paneMode = pane; window.setContentSize(NSSize(width: 800, height: 780)); browser.view.needsLayout = true; window.contentView?.layoutSubtreeIfNeeded()
       let visible = Set(browser.table.tableColumns.filter { !$0.isHidden }.map { $0.identifier.rawValue })
-      try check(visible == custom.visible && browser.detailColumns == custom && browser.tableScroll.hasHorizontalScroller, "Narrow window preserves explicit column choices with pane " + pane)
+      try check(visible == custom.visible && browser.detailColumns == custom && browser.fileScroll.hasHorizontalScroller, "Narrow window preserves explicit column choices with pane " + pane)
       let last = browser.table.tableColumns.lastIndex { !$0.isHidden }!
-      browser.table.scrollColumnToVisible(last); browser.tableScroll.layoutSubtreeIfNeeded()
+      browser.table.scrollColumnToVisible(last); browser.fileScroll.layoutSubtreeIfNeeded()
       try check(browser.table.rect(ofColumn: last).maxX <= browser.table.visibleRect.maxX + 1, "Horizontal scrolling reaches the last chosen column with pane " + pane)
       browser.table.scrollColumnToVisible(browser.table.column(withIdentifier: .init("name")))
     }

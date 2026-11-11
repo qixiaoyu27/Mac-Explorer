@@ -49,10 +49,13 @@ enum NativeWorkflowChecks {
       }
       let row = browser.displayRows.firstIndex { $0.group != nil }!
       let group = browser.groups[browser.groupIndex(at: row)!]
-      browser.selectedPaths = Set(group.entries.map(\.id)); browser.toggleGroup(at: row)
-      try check(browser.selectedPaths.isEmpty && browser.displayRows.compactMap(\.entry).count == 91 - group.entries.count, "\(layout): collapse clears hidden selection")
+      let groupPaths = Set(group.entries.map(\.id))
+      browser.selectedPaths = groupPaths; browser.toggleGroup(at: row)
+      let visibleSelectionCount = layout == .details ? browser.table.selectedRowIndexes.count : browser.collection.selectionIndexPaths.count
+      try check(browser.selectedPaths == groupPaths && visibleSelectionCount == 0 &&
+                browser.displayRows.compactMap(\.entry).count == 91 - group.entries.count, "\(layout): collapse preserves selection and removes hidden rows from the view")
       browser.selectAllFiles()
-      try check(browser.selectedEntries().count == 91 - group.entries.count, "\(layout): Select All excludes collapsed items")
+      try check(browser.selectedEntries().count == 91, "\(layout): Select All includes collapsed items")
       browser.toggleGroup(at: row)
     }
     browser.checkboxes = true; browser.setView(.details); browser.setGrouping(.none); window.contentView?.layoutSubtreeIfNeeded()
@@ -88,10 +91,10 @@ enum NativeWorkflowChecks {
     window.pointer = browser.table.convert(NSPoint(x: rowFrame.minX + 100, y: rowFrame.midY), to: nil)
     firstRow.mouseEntered(with: hoverEvent)
     try check(firstRow.hovered, "The row under the pointer receives a hover background")
-    let tableOrigin = browser.tableScroll.contentView.bounds.origin
+    let tableOrigin = browser.fileScroll.contentView.bounds.origin
     for offset: CGFloat in [8, 16, 3, 0] {
-      browser.tableScroll.contentView.scroll(to: NSPoint(x: tableOrigin.x, y: tableOrigin.y + offset * browser.table.rowHeight))
-      browser.tableScroll.reflectScrolledClipView(browser.tableScroll.contentView); window.contentView?.layoutSubtreeIfNeeded()
+      browser.fileScroll.contentView.scroll(to: NSPoint(x: tableOrigin.x, y: tableOrigin.y + offset * browser.table.rowHeight))
+      browser.fileScroll.reflectScrolledClipView(browser.fileScroll.contentView); window.contentView?.layoutSubtreeIfNeeded()
       let visible = browser.table.rows(in: browser.table.visibleRect)
       let rows = (visible.location..<NSMaxRange(visible)).compactMap { browser.table.rowView(atRow: $0, makeIfNecessary: true) as? FileRowView }
       firstRow.updateTrackingAreas(); rows.forEach { $0.updateTrackingAreas() }
@@ -100,10 +103,12 @@ enum NativeWorkflowChecks {
       let hovered = rows.filter(\.hovered)
       try check(hovered.count == 1 && hovered.first === targetView && firstRow.hovered == (firstRow === targetView), "Details scroll offset \(offset): only the row currently under the stationary pointer stays hovered")
     }
+    let originalSize = window.contentView!.bounds.size
+    window.setContentSize(NSSize(width: 900, height: 500))
     for mode in [ExplorerLayoutMode.icons, .list, .tiles, .content] {
       browser.setView(mode, size: 64); window.contentView?.layoutSubtreeIfNeeded()
-      let clip = browser.collectionScroll.contentView
-      clip.scroll(to: .zero); browser.collectionScroll.reflectScrolledClipView(clip); browser.collection.layoutSubtreeIfNeeded()
+      let clip = browser.fileScroll.contentView
+      clip.scroll(to: .zero); browser.fileScroll.reflectScrolledClipView(clip); browser.collection.layoutSubtreeIfNeeded()
       let firstPath = browser.collection.indexPathsForVisibleItems().min { $0.item < $1.item }!
       let first = browser.collection.item(at: firstPath)!.view as! ItemSurface
       window.pointer = first.convert(NSPoint(x: first.bounds.midX, y: first.bounds.midY), to: nil)
@@ -113,7 +118,7 @@ enum NativeWorkflowChecks {
       try check(extent > 0, "\(mode): the hover fixture genuinely scrolls")
       for fraction: CGFloat in [0.35, 0.75, 0.15, 0] {
         clip.scroll(to: mode == .list ? NSPoint(x: extent * fraction, y: 0) : NSPoint(x: 0, y: extent * fraction))
-        browser.collectionScroll.reflectScrolledClipView(clip); browser.collection.layoutSubtreeIfNeeded()
+        browser.fileScroll.reflectScrolledClipView(clip); browser.collection.layoutSubtreeIfNeeded()
         let surfaces = browser.collection.visibleItems().map(\.view).compactMap { $0 as? ItemSurface }
         first.updateTrackingAreas(); surfaces.forEach { $0.updateTrackingAreas() }
         let targetPath = browser.collection.indexPathForItem(at: browser.collection.convert(window.pointer, from: nil))
@@ -133,23 +138,29 @@ enum NativeWorkflowChecks {
       surfaces.forEach { $0.updateTrackingAreas() }
       try check(!surfaces.contains(where: \.hovered), "\(mode): leaving the file area clears every hover background")
     }
+    window.setContentSize(originalSize)
     window.pointerIsActive = false
     try check(browser.selectedPaths == hoverSelection, "Scrolling and hover tracking preserve the selected files")
     browser.setView(.details)
     browser.setGrouping(.modified)
     let selected = browser.entries.last!.id
     browser.selectedPaths = [selected]; browser.updateMode(persist: false)
-    browser.tableScroll.contentView.scroll(to: NSPoint(x: 0, y: 1200)); browser.tableScroll.reflectScrolledClipView(browser.tableScroll.contentView)
-    let originalOffset = browser.tableScroll.contentView.bounds.origin
+    browser.fileScroll.contentView.scroll(to: NSPoint(x: 0, y: 1200)); browser.fileScroll.reflectScrolledClipView(browser.fileScroll.contentView)
+    let originalOffset = browser.fileScroll.contentView.bounds.origin
     browser.openTab(at: folder); try await until { !browser.loading && browser.directory.path == folder.path }
     try check(browser.groupMode == .none, "A different folder retains its independent grouping preference")
     browser.closeTab(); try await until { !browser.loading && browser.directory.path == root.path }
-    try check(browser.groupMode == .modified && browser.selectedPaths == [selected] && abs(browser.tableScroll.contentView.bounds.origin.y - originalOffset.y) < 2, "Returning to a grouped tab restores its scroll and selection; mode=\(browser.groupMode), selection=\(browser.selectedPaths), before=\(originalOffset), after=\(browser.tableScroll.contentView.bounds.origin)")
-    for fileView in [browser.table as NSView, browser.collection as NSView] {
+    try check(browser.groupMode == .modified && browser.selectedPaths == [selected] && abs(browser.fileScroll.contentView.bounds.origin.y - originalOffset.y) < 2, "Returning to a grouped tab restores its scroll and selection; mode=\(browser.groupMode), selection=\(browser.selectedPaths), before=\(originalOffset), after=\(browser.fileScroll.contentView.bounds.origin)")
+    for mode in [ExplorerLayoutMode.details, .icons] {
+      browser.setView(mode)
+      let fileView = browser.fileScroll.documentView
       var renamed = false, opened = false
       let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!
-      if let table = fileView as? FileTableView { let rename = table.renameSelection, open = table.openSelection; table.renameSelection = { renamed = true }; table.openSelection = { opened = true }; table.keyDown(with: key); table.renameSelection = rename; table.openSelection = open }
-      if let collection = fileView as? FileCollectionView { let rename = collection.renameSelection, open = collection.openSelection; collection.renameSelection = { renamed = true }; collection.openSelection = { opened = true }; collection.keyDown(with: key); collection.renameSelection = rename; collection.openSelection = open }
+      let open = browser.selectionManager.openSelection
+      browser.selectionManager.openSelection = { opened = true }
+      defer { browser.selectionManager.openSelection = open }
+      if let table = fileView as? FileTableView { let rename = table.renameSelection; table.renameSelection = { renamed = true }; table.keyDown(with: key); table.renameSelection = rename }
+      if let collection = fileView as? FileCollectionView { let rename = collection.renameSelection; collection.renameSelection = { renamed = true }; collection.keyDown(with: key); collection.renameSelection = rename }
       try check(renamed && !opened, "Return retains the existing rename action")
     }
     let filenameFixtures = ["数字员工平台需求说明.docx", "Codex 实施文档与数字员工平台系统运行流程和配置说明（修订版）.md", String(repeating: "LongFileName", count: 6) + ".txt"]
