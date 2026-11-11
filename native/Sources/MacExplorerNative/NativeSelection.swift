@@ -209,6 +209,7 @@ enum NativeSelectionChecks {
       try expect(browser.selectedPaths == [secondPath] && menuIsOpen(), "\(mode.rawValue): Secondary mouse button still opens the item menu")
       dismissMenu()
     }
+    checks += try runSidebarMenuInput()
     window.makeKeyAndOrderFront(nil)
     window.contentView?.layoutSubtreeIfNeeded()
     let addCenter = browser.addTabButton.convert(NSPoint(x: browser.addTabButton.bounds.midX, y: browser.addTabButton.bounds.midY), to: nil)
@@ -216,6 +217,100 @@ enum NativeSelectionChecks {
     try expect(!closeButtons.isEmpty && closeButtons.allSatisfy {
       abs($0.convert(NSPoint(x: $0.bounds.midX, y: $0.bounds.midY), to: nil).y - addCenter.y) < 0.01
     }, "Tab add and close buttons have the same vertical center in window coordinates")
+    checks += try runMenuShadow(window: window)
+    return checks
+  }
+
+  private static func runSidebarMenuInput() throws -> [String] {
+    let host = NSWindow(contentRect: NSRect(x: 220, y: 180, width: 260, height: 160), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+    host.isReleasedWhenClosed = false
+    var opens = 0, contexts = 0
+    let row = ExplorerSidebarRow(title: "Sidebar fixture", icon: "folder", onOpen: { opens += 1 })
+    row.frame = NSRect(x: 10, y: 60, width: 230, height: 36)
+    host.contentView?.addSubview(row)
+    row.onContext = { event in
+      contexts += 1
+      ExplorerMenu.show([ExplorerMenuItem(title: "Fixture action")], at: host.convertPoint(toScreen: event.locationInWindow), owner: host)
+    }
+    defer { ExplorerMenu.dismiss(); host.close() }
+    var checks: [String] = []
+    func send(_ type: NSEvent.EventType, modifiers: NSEvent.ModifierFlags) {
+      let point = row.convert(NSPoint(x: 80, y: row.bounds.midY), to: nil)
+      NSApp.sendEvent(NSEvent.mouseEvent(with: type, location: point, modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime,
+                                       windowNumber: host.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)!)
+    }
+    for releaseModifiers in [NSEvent.ModifierFlags.control, []] {
+      host.makeKeyAndOrderFront(nil)
+      let before = contexts
+      send(.leftMouseDown, modifiers: .control)
+      send(.leftMouseUp, modifiers: releaseModifiers)
+      guard opens == 0, contexts == before + 1, host.childWindows?.contains(where: { $0.isVisible }) == true else {
+        throw NativeSmoke.Failure(description: "Sidebar Control-click keeps one menu open without navigating on mouse-up (release modifiers: \(releaseModifiers.rawValue), opens: \(opens), contexts: \(contexts - before))")
+      }
+      checks.append("Sidebar Control-click retains its menu without navigation, with release modifiers \(releaseModifiers.rawValue)")
+      ExplorerMenu.dismiss()
+    }
+    host.makeKeyAndOrderFront(nil)
+    let before = contexts
+    send(.rightMouseDown, modifiers: [])
+    guard opens == 0, contexts == before + 1, host.childWindows?.contains(where: { $0.isVisible }) == true else {
+      throw NativeSmoke.Failure(description: "Sidebar secondary click opens one context menu without navigation")
+    }
+    checks.append("Sidebar secondary click opens one context menu without navigation")
+    ExplorerMenu.dismiss(); host.makeKeyAndOrderFront(nil)
+    send(.leftMouseDown, modifiers: []); send(.leftMouseUp, modifiers: [])
+    guard opens == 1, contexts == before + 1 else { throw NativeSmoke.Failure(description: "A normal sidebar click still navigates once after dismissing its menu") }
+    checks.append("A normal sidebar click still navigates once after dismissing its menu")
+    return checks
+  }
+
+  private static func runMenuShadow(window: NSWindow) throws -> [String] {
+    let appearance = NSApp.appearance, childCount = window.childWindows?.count ?? 0
+    defer { ExplorerMenu.dismiss(); NSApp.appearance = appearance; window.makeKeyAndOrderFront(nil) }
+    var checks: [String] = [], lightAlpha: CGFloat = 0
+    func expect(_ condition: Bool, _ message: String) throws {
+      guard condition else { throw NativeSmoke.Failure(description: message) }
+      checks.append(message)
+    }
+    for name in [NSAppearance.Name.aqua, .darkAqua] {
+      NSApp.appearance = NSAppearance(named: name)
+      ExplorerMenu.show([ExplorerMenuItem(title: "Submenu", children: [ExplorerMenuItem(title: "Child")])], at: NSPoint(x: window.frame.midX, y: window.frame.midY), owner: window)
+      guard let menu = window.childWindows?.last, let shadow = menu.childWindows?.first,
+            let surface = shadow.contentView,
+            let bitmap = surface.bitmapImageRepForCachingDisplay(in: surface.bounds) else {
+        throw NativeSmoke.Failure(description: "Menu owns a drawable shadow surface")
+      }
+      try expect(!menu.hasShadow && !shadow.hasShadow && shadow.ignoresMouseEvents && shadow.isVisible,
+                 "\(name.rawValue): Custom shadow is visible without a native shadow or mouse interception")
+      surface.cacheDisplay(in: surface.bounds, to: bitmap)
+      let caster = shadow.convertFromScreen(menu.frame)
+      func alpha(_ point: NSPoint) -> CGFloat {
+        let x = Int(point.x * CGFloat(bitmap.pixelsWide) / surface.bounds.width)
+        let y = bitmap.pixelsHigh - 1 - Int(point.y * CGFloat(bitmap.pixelsHigh) / surface.bounds.height)
+        return bitmap.colorAt(x: x, y: y)?.alphaComponent ?? -1
+      }
+      let below = alpha(NSPoint(x: caster.midX, y: caster.minY - 2))
+      let above = alpha(NSPoint(x: caster.midX, y: caster.maxY + 2))
+      try expect(alpha(NSPoint(x: caster.midX, y: caster.midY)) == 0 && alpha(NSPoint(x: caster.minX + 0.5, y: caster.midY)) == 0,
+                 "\(name.rawValue): Shadow leaves the menu interior and border transparent")
+      try expect(below > above && above >= 0 && alpha(NSPoint(x: caster.midX, y: 0)) == 0,
+                 "\(name.rawValue): Shadow falls downward and fades before the canvas edge")
+      if name == .aqua { lightAlpha = below }
+      else { try expect(below > lightAlpha && below <= 66.0 / 255, "Dark menu shadow follows the stronger WinUI opacity") }
+      func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+      guard let body = menu.contentView, let row = descendants(body).first(where: { $0.accessibilityLabel() == "Submenu" }),
+            let hover = NSEvent.mouseEvent(with: .mouseMoved, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: menu.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0) else {
+        throw NativeSmoke.Failure(description: "Shadow fixture has a submenu row")
+      }
+      row.mouseEntered(with: hover)
+      guard let submenu = window.childWindows?.last, submenu !== menu, let subShadow = submenu.childWindows?.first else {
+        throw NativeSmoke.Failure(description: "Submenu owns its own shadow")
+      }
+      try expect(subShadow.isVisible && subShadow.ignoresMouseEvents, "\(name.rawValue): Submenu has an independent noninteractive shadow")
+      ExplorerMenu.dismiss()
+      try expect(!menu.isVisible && !shadow.isVisible && !submenu.isVisible && !subShadow.isVisible && (window.childWindows?.count ?? 0) == childCount,
+                 "\(name.rawValue): Dismissing menus removes both shadow windows")
+    }
     return checks
   }
 

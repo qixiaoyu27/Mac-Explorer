@@ -392,20 +392,31 @@ enum NativeSmoke {
       try capture(window, at: output.appendingPathComponent("native-properties.png")); try dismissDialog(window)
       let areas: [String: NSView] = [".tab-strip": browser.tabsBar, ".navigation-bar": browser.navigationBar, ".command-bar": browser.commandBar, ".sidebar": browser.sidebar, ".file-content": browser.content, ".status-bar": browser.footer, ".address-bar": browser.addressBar, ".search-box": browser.searchBox]
       let geometry = areas.mapValues { area in let rect = area.convert(area.bounds, to: browser.view); return ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height] }
-      if let index = browser.entries.firstIndex(where: { $0.name == "产品需求.md" }) {
-        browser.table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+      if let index = browser.entries.firstIndex(where: { $0.name == "产品需求.md" }),
+         let row = (0..<browser.table.numberOfRows).first(where: { browser.entryIndex(at: $0) == index }) {
+        browser.table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         browser.executeAction("details-pane")
         try await Task.sleep(nanoseconds: 300_000_000)
         try capture(window, at: output.appendingPathComponent("native-details-pane.png"))
         browser.executeAction("details-pane")
-        let items = browser.contextItems(), quickNames = ["剪切", "复制", "重命名", "移到回收站"]
-        ExplorerMenu.show(items.filter { !quickNames.contains($0.title) }, at: NSPoint(x: window.frame.midX, y: window.frame.midY + 180), owner: window, quickActions: quickNames.compactMap { name in items.first { $0.title == name } })
+        browser.table.scrollRowToVisible(row)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let point = browser.table.convert(NSPoint(x: 70, y: browser.table.rect(ofRow: row).midY), to: nil)
+        guard let click = NSEvent.mouseEvent(with: .rightMouseDown, location: point, modifierFlags: [],
+                                             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                             context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+        else { throw Failure(description: "Cannot create the context-menu click") }
+        _ = browser.table.menu(for: click)
+        guard window.childWindows?.contains(where: { $0 is NSPanel && $0.isVisible }) == true else {
+          throw Failure(description: "File context menu did not open for capture")
+        }
         try capture(window, at: output.appendingPathComponent("native-context.png")); ExplorerMenu.dismiss()
       }
       let appItems = ["Finder（默认）", "Visual Studio Code", "Books", "ChatGPT", "Mac Explorer", "选择其他应用"].map { ExplorerMenuItem(title: $0, icon: "applications") }
-      let appWidth = ExplorerMenu.fittedWidth(appItems, submenu: true)
-      guard appWidth >= 180 && appWidth < 230,
-            ExplorerMenu.fittedWidth([ExplorerMenuItem(title: "复制", shortcut: "⌃⌥⇧⌘C")], submenu: true) >= 180 else { throw Failure(description: "Submenu must fit measured labels and shortcuts") }
+      let appWidth = ExplorerMenu.fittedWidth(appItems)
+      let shortcutItem = ExplorerMenuItem(title: "Copy selected file path", shortcut: "⌃⌥⇧⌘C")
+      guard appWidth > 136 && appWidth < 180,
+            ExplorerMenu.fittedWidth([shortcutItem]) > ExplorerMenu.fittedWidth([ExplorerMenuItem(title: shortcutItem.title)]) else { throw Failure(description: "Submenu must fit measured labels and shortcuts") }
       ExplorerMenu.show([ExplorerMenuItem(title: "打开方式", children: appItems)], at: NSPoint(x: window.frame.midX, y: window.frame.midY + 180), owner: window)
       if let menu = window.childWindows?.last, let down = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: menu.windowNumber, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 125) { NSApp.sendEvent(down) }
       try await Task.sleep(nanoseconds: 100_000_000)

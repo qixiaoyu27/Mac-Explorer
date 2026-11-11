@@ -98,7 +98,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   private var isCut = false
   private var clipboardChange = -1
   private var shortcutOverrides: [String: String] = [:]
-  private var toolbarOrder = ["cut", "copy", "paste", "rename", "share", "trash"]
+  private var toolbarOrder = ["cut", "copy", "paste", "rename", "trash"]
   var fileErrorNetworkLocation: (URL) -> Bool? = NativeFileFailure.networkLocation
   var recycleItem: (URL, URL?, NSWindow) async throws -> URL = { try await NativeRecycle.recycle($0, cloudRoot: $1, window: $2) }
   private(set) var detailColumns = DetailColumns()
@@ -191,7 +191,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     shortcutOverrides = defaults.dictionary(forKey: "shortcuts") as? [String: String] ?? [:]
     searchFilters = FileSearchFilters(propertyList: defaults.dictionary(forKey: "searchFilters"))
     if let saved = defaults.stringArray(forKey: "toolbar") {
-      let allowed = Set(["cut", "copy", "paste", "rename", "batchRename", "share", "trash", "airdrop", "terminal", "undo", "refresh"])
+      let allowed = Set(["cut", "copy", "paste", "rename", "batchRename", "trash", "airdrop", "terminal", "undo", "refresh"])
       var seen = Set<String>(); toolbarOrder = saved.filter { allowed.contains($0) && seen.insert($0).inserted }
     }
     showHidden = defaults.bool(forKey: "showHidden")
@@ -220,7 +220,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     for scroll in [tabsScroll, sidebarScroll] { scroll.automaticallyAdjustsContentInsets = false }
     tabsScroll.drawsBackground = false; tabsScroll.hasHorizontalScroller = false; tabsScroll.documentView = tabsDocument
     tabsBar.addSubview(tabsScroll); tabsBar.addSubview(addTabButton)
-    addTabButton.onPress = { [weak self] in self?.newTab() }; addTabButton.toolTip = NL("新建标签页 ⌘T")
+    addTabButton.onPress = { [weak self] in self?.newTab() }; addTabButton.toolTip = NL("新建选项卡 ⌘T")
     for item in [backButton, forwardButton, upButton, refreshButton] { navigationBar.addSubview(item) }
     refreshButton.iconDimension = 14
     navigationBar.addSubview(addressBar); navigationBar.addSubview(searchBox)
@@ -352,8 +352,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
       ("paste", "paste", NL("粘贴 ⌘V"), { [weak self] in self?.pasteFiles() }),
       ("rename", "rename", NL("重命名 F2"), { [weak self] in self?.renameSelected() }),
       ("batchRename", "rename", NL("批量重命名"), { [weak self] in self?.batchRenameSelected() }),
-      ("share", "share", NL("共享"), { [weak self] in self?.shareSelected() }),
-      ("trash", "trash", NL("移到回收站 ⌘⌫"), { [weak self] in self?.trashSelected() }),
+      ("trash", "trash", NL("删除 ⌘⌫"), { [weak self] in self?.trashSelected() }),
       ("airdrop", "airdrop", NL("隔空投送"), { [weak self] in self?.sendAirDrop() }),
       ("terminal", "terminal", NL("在终端中打开"), { [weak self] in self?.openTerminal() }),
       ("undo", "undo", NL("撤销"), { [weak self] in self?.undoFiles() }),
@@ -710,7 +709,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   }
   private func sidebarMenu(_ url: URL, canEject: Bool, event: NSEvent) {
     guard let window = view.window else { return }
-    var items = [ExplorerMenuItem(title: NL("在新标签页中打开"), icon: "plus", action: { [weak self] in self?.openTab(at: url) })]
+    var items = [ExplorerMenuItem(title: NL("在新选项卡中打开"), icon: "plus", action: { [weak self] in self?.openTab(at: url) })]
     if url.isFileURL {
       items.append(ExplorerMenuItem(title: NL("在此处打开终端"), icon: "terminal", action: { [weak self] in self?.openTerminal(at: url) }))
       if !isCloudLocation(url) && !url.pathComponents.contains(".Trash") && !url.pathComponents.contains(".Trashes") {
@@ -1084,8 +1083,8 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     commands["cut"]?.isEnabled = count > 0 && !busy && !viewingTrash; commands["copy"]?.isEnabled = count > 0 && !busy
     commands["paste"]?.isEnabled = (!clipboard.isEmpty || filePasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])) && !busy && writable
     let network = networkDeletionHint
-    commands["rename"]?.isEnabled = count == 1 && !busy && !viewingTrash; commands["share"]?.isEnabled = count > 0 && !busy; commands["trash"]?.isEnabled = count > 0 && !busy && !viewingTrash && !network
-    commands["trash"]?.toolTip = network ? NL("暂不支持删除网络项目。") : NL("移到回收站") + " " + shortcutHint("trash")
+    commands["rename"]?.isEnabled = count == 1 && !busy && !viewingTrash; commands["trash"]?.isEnabled = count > 0 && !busy && !viewingTrash && !network
+    commands["trash"]?.toolTip = network ? NL("暂不支持删除网络项目。") : NL("删除") + " " + shortcutHint("trash")
     commands["airdrop"]?.isEnabled = count > 0 && !busy; commands["terminal"]?.isEnabled = directory.isFileURL && !busy
     commands["undo"]?.isEnabled = !undoChanges.isEmpty && !busy; commands["refresh"]?.isEnabled = !busy
     commands["batchRename"]?.isEnabled = count >= 2 && !busy && !viewingTrash
@@ -1600,19 +1599,19 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   }
   private func moreMenu() -> [ExplorerMenuItem] {
     let target = pinTarget(), pinned = target.map { pinnedPaths.contains($0.path) } ?? false
-    return [ExplorerMenuItem(title: NL("打开文件夹…"), icon: "folder", action: { [weak self] in self?.chooseDirectory() }), ExplorerMenuItem(title: pinned ? NL("从快速访问取消固定") : NL("固定到快速访问"), icon: "pin", enabled: target != nil, action: { [weak self] in if let target { self?.togglePin(target) } }), ExplorerMenuItem(title: NL("全选"), shortcut: shortcutHint("select-all"), action: { [weak self] in self?.selectAllFiles() }), ExplorerMenuItem(title: NL("取消选择"), action: { [weak self] in self?.selectionManager.SelectionChange(.clear) }), ExplorerMenuItem(title: NL("撤销"), icon: "undo", enabled: !undoChanges.isEmpty && !busy, divider: true, shortcut: shortcutHint("undo"), action: { [weak self] in self?.undoFiles() }), ExplorerMenuItem(title: NL("重做"), enabled: !redoChanges.isEmpty && !busy, shortcut: shortcutHint("redo"), action: { [weak self] in self?.redoFiles() }), ExplorerMenuItem(title: NL("设置…"), icon: "settings", divider: true, action: { [weak self] in self?.showSettings() })]
+    return [ExplorerMenuItem(title: NL("打开文件夹…"), icon: "folder", action: { [weak self] in self?.chooseDirectory() }), ExplorerMenuItem(title: pinned ? NL("从快速访问取消固定") : NL("固定到快速访问"), icon: "pin", enabled: target != nil, action: { [weak self] in if let target { self?.togglePin(target) } }), ExplorerMenuItem(title: NL("全选"), shortcut: shortcutHint("select-all"), action: { [weak self] in self?.selectAllFiles() }), ExplorerMenuItem(title: NL("全不选"), action: { [weak self] in self?.selectionManager.SelectionChange(.clear) }), ExplorerMenuItem(title: NL("撤销"), icon: "undo", enabled: !undoChanges.isEmpty && !busy, divider: true, shortcut: shortcutHint("undo"), action: { [weak self] in self?.undoFiles() }), ExplorerMenuItem(title: NL("重做"), enabled: !redoChanges.isEmpty && !busy, shortcut: shortcutHint("redo"), action: { [weak self] in self?.redoFiles() }), ExplorerMenuItem(title: NL("选项"), icon: "settings", divider: true, action: { [weak self] in self?.showSettings() })]
   }
   func contextItems() -> [ExplorerMenuItem] {
     let chosen = selectedEntries(), first = selectedEntries().first
     let canPaste = !busy && writable && (!clipboard.isEmpty || filePasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]))
     let refresh = ExplorerMenuItem(title: NL("刷新"), icon: "refresh", shortcut: shortcutHint("refresh"), action: { [weak self] in self?.executeAction("refresh") })
-    let hidden = ExplorerMenuItem(title: showHidden ? NL("不显示隐藏项目") : NL("显示隐藏的项目"), checked: showHidden, action: { [weak self] in self?.toggleHidden() })
+    let hidden = ExplorerMenuItem(title: NL("隐藏的项目"), checked: showHidden, action: { [weak self] in self?.toggleHidden() })
     if viewingTrash {
       var items: [ExplorerMenuItem] = []
       if !chosen.isEmpty {
         items += [ExplorerMenuItem(title: NL("还原"), icon: "undo", enabled: !busy, action: { [weak self] in self?.restoreFromTrash(choose: false) }), ExplorerMenuItem(title: NL("还原到…"), icon: "folder", enabled: !busy, action: { [weak self] in self?.restoreFromTrash(choose: true) })]
       }
-      items.append(ExplorerMenuItem(title: NL("清空回收站…"), icon: "trash", enabled: !busy, action: { [weak self] in self?.emptySystemTrash() }))
+      items.append(ExplorerMenuItem(title: NL("清空回收站"), icon: "trash", enabled: !busy, action: { [weak self] in self?.emptySystemTrash() }))
       if let first {
         items += [ExplorerMenuItem(title: first.isDirectory ? NL("打开") : NL("快速查看"), icon: "folder", action: { [weak self] in if first.isDirectory { self?.openSelected() } else { self?.previewSelected() } }), ExplorerMenuItem(title: NL("复制"), icon: "copy", shortcut: shortcutHint("copy"), action: { [weak self] in self?.copySelection(cut: false) })]
       }
@@ -1630,17 +1629,16 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
         }
         items.append(ExplorerMenuItem(title: NL("快速查看"), icon: "eye", shortcut: shortcutHint("quick-look"), action: { [weak self] in self?.previewSelected() }))
       } else {
-        items += [ExplorerMenuItem(title: NL("在新标签页中打开"), icon: "plus", action: { [weak self] in self?.openTab(at: first.url) }), ExplorerMenuItem(title: NL("在终端中打开"), icon: "terminal", action: { [weak self] in self?.openTerminal(at: first.url) })]
+        items += [ExplorerMenuItem(title: NL("在新选项卡中打开"), icon: "plus", action: { [weak self] in self?.openTab(at: first.url) }), ExplorerMenuItem(title: NL("在终端中打开"), icon: "terminal", action: { [weak self] in self?.openTerminal(at: first.url) })]
       }
       items += [
-        ExplorerMenuItem(title: NL("压缩为 ZIP"), icon: "archive", enabled: !busy, action: { [weak self] in self?.compressSelection() }),
+        ExplorerMenuItem(title: NL("压缩为 ZIP 文件"), icon: "archive", enabled: !busy, action: { [weak self] in self?.compressSelection() }),
         ExplorerMenuItem(title: NL("剪切"), icon: "scissors", enabled: !busy, shortcut: shortcutHint("cut"), action: { [weak self] in self?.copySelection(cut: true) }),
         ExplorerMenuItem(title: NL("复制"), icon: "copy", shortcut: shortcutHint("copy"), action: { [weak self] in self?.copySelection(cut: false) }),
         ExplorerMenuItem(title: NL("复制文件地址"), icon: "copy", action: { [weak self] in self?.copyPaths() }),
         ExplorerMenuItem(title: NL("Finder 标签…"), icon: "tag", enabled: !busy, action: { [weak self] in self?.editFinderTags() }),
         ExplorerMenuItem(title: NL("重命名"), icon: "rename", enabled: chosen.count == 1 && !busy, shortcut: shortcutHint("rename"), action: { [weak self] in self?.renameSelected() }),
         ExplorerMenuItem(title: NL("批量重命名"), icon: "rename", enabled: chosen.count >= 2 && !busy, action: { [weak self] in self?.batchRenameSelected() }),
-        ExplorerMenuItem(title: NL("共享"), icon: "share", action: { [weak self] in self?.shareSelected() }),
         ExplorerMenuItem(title: deletionTitle, icon: "trash", enabled: !busy && !networkDeletionHint, shortcut: shortcutHint("trash"), action: { [weak self] in self?.trashSelected() })]
       if first.isDirectory, !isCloudLocation(first.url) {
         items.append(ExplorerMenuItem(title: pinnedPaths.contains(first.url.path) ? NL("从快速访问取消固定") : NL("固定到快速访问"), icon: "pin", divider: true, action: { [weak self] in self?.togglePin(first.url) }))
@@ -1664,7 +1662,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   private func showContext(at point: NSPoint) {
     guard let window = view.window else { return }
     let items = contextItems()
-    let quickNames = viewingTrash || selectedPaths.isEmpty ? [] : [NL("剪切"), NL("复制"), NL("重命名"), NL("移到回收站")]
+    let quickNames = viewingTrash || selectedPaths.isEmpty ? [] : [NL("剪切"), NL("复制"), NL("重命名"), deletionTitle]
     let quick = quickNames.compactMap { name in items.first { $0.title == name } }
     ExplorerMenu.show(items.filter { !quickNames.contains($0.title) }, at: window.convertPoint(toScreen: point), owner: window, quickActions: quick)
   }
@@ -1952,7 +1950,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     selectedHiddenNetwork = selectedHiddenEntries.contains { networkLocation(entries[$0].url) == true }
   }
   private var networkDeletionHint: Bool { selectedHiddenNetwork || !selectedNetworkRows.isEmpty }
-  private var deletionTitle: String { networkDeletionHint ? NL("删除") : NL("移到回收站") }
+  private var deletionTitle: String { NL("删除") }
   private func trashSelected() {
     let sources = selectedEntries().map(\.url)
     guard !busy, !sources.isEmpty, !viewingTrash, let window = view.window else { return }
@@ -2095,7 +2093,6 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
       }
     } catch { lastError = error.localizedDescription; render() }
   }
-  private func shareSelected() { let urls = selectedEntries().map(\.url); guard !urls.isEmpty, let button = commands["share"] else { return }; NSSharingServicePicker(items: urls).show(relativeTo: button.bounds, of: button, preferredEdge: .minY) }
   private func openSystemLocation(_ name: String) {
     if name == "airdrop" { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app/Contents/Applications/AirDrop.app")) }
     else { askName(title: NL("连接服务器"), value: "smb://") { [weak self] value in self?.connectServer(value) } }

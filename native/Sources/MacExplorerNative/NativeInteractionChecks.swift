@@ -58,8 +58,8 @@ enum NativeInteractionChecks {
       let buttons = descendants(body).compactMap { $0 as? NSButton }.filter { titles.contains($0.title) }
       try check(buttons.count == titles.count, "All quick-action buttons are present")
       for button in buttons {
-        let textWidth = (button.title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 10)]).width
-        try check(button.bounds.width >= textWidth + 12, "Quick-action hover background contains \(button.title) with padding")
+        let textWidth = (button.title as NSString).size(withAttributes: [.font: ExplorerTypography.font(ofSize: 12)]).width
+        try check(button.bounds.width == min(120, max(60, ceil(textWidth))), "Quick-action button fits \(button.title) within the template limits")
       }
       ExplorerMenu.dismiss()
     }

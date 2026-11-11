@@ -155,7 +155,7 @@ enum ExplorerDialogs {
     in window: NSWindow,
     theme: String,
     onTheme: @escaping (String) -> Void,
-    toolbar: [String] = ["cut", "copy", "paste", "rename", "share", "trash"],
+    toolbar: [String] = ["cut", "copy", "paste", "rename", "trash"],
     onToolbar: (([String]) -> Void)? = nil,
     shortcutRows: [(String, String)] = [],
     onShortcut: ((String, String) -> Void)? = nil,
@@ -698,7 +698,7 @@ final class EDBatchRenameForm: EDView, NSTextFieldDelegate {
   private let suffix = ExplorerTextField()
   private let find = ExplorerTextField()
   private let replacement = ExplorerTextField()
-  private let casing = NSPopUpButton()
+  private let casing = ExplorerPopUpButton(frame: .zero, pullsDown: false)
   private let removeBracketed = NSButton(checkboxWithTitle: NL("删除括号内容"), target: nil, action: nil)
   private let sequence = NSButton(checkboxWithTitle: NL("添加数字序列"), target: nil, action: nil)
   private let sequenceStart = ExplorerTextField()
@@ -1024,8 +1024,8 @@ final class EDSettingsBody: EDView {
   private var shortcutError: NSTextField?
   private var shortcutSave: EDButton?
   private var shortcutReset: EDButton?
-  private let allTools = ["cut", "copy", "paste", "rename", "batchRename", "share", "trash", "airdrop", "terminal", "undo", "refresh"]
-  private let toolLabels = ["cut": NL("剪切"), "copy": NL("复制"), "paste": NL("粘贴"), "rename": NL("重命名"), "batchRename": NL("批量重命名"), "share": NL("共享"), "trash": NL("移到回收站"), "airdrop": NL("隔空投送"), "terminal": NL("在终端中打开"), "undo": NL("撤销"), "refresh": NL("刷新")]
+  private let allTools = ["cut", "copy", "paste", "rename", "batchRename", "trash", "airdrop", "terminal", "undo", "refresh"]
+  private let toolLabels = ["cut": NL("剪切"), "copy": NL("复制"), "paste": NL("粘贴"), "rename": NL("重命名"), "batchRename": NL("批量重命名"), "trash": NL("删除"), "airdrop": NL("隔空投送"), "terminal": NL("在终端中打开"), "undo": NL("撤销"), "refresh": NL("刷新")]
 
   init(theme: String, toolbar: [String], shortcutRows: [(String, String)], onTheme: @escaping (String) -> Void, onToolbar: (([String]) -> Void)?, onShortcut: ((String, String) -> Void)?, shortcutDefaults: [String: String], folderDefaults: [String: String], onFolderDefaults: (([String: String]) -> Void)?, onResetFolders: (() -> Void)?) {
     self.theme = theme
@@ -1294,7 +1294,7 @@ final class EDSettingsBody: EDView {
       let reset = EDButton(title: NL("恢复默认工具栏"), style: .secondary)
       reset.onPress = { [weak self] in
         guard let self else { return }
-        self.toolbar = ["cut", "copy", "paste", "rename", "share", "trash"]
+        self.toolbar = ["cut", "copy", "paste", "rename", "trash"]
         onToolbar(self.toolbar)
         self.select(1)
       }

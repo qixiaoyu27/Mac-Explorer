@@ -35,7 +35,7 @@ enum ExplorerPalette {
     NSColor(srgbRed: CGFloat((value >> 16) & 255) / 255, green: CGFloat((value >> 8) & 255) / 255, blue: CGFloat(value & 255) / 255, alpha: alpha)
   }
 
-  private static func dynamic(_ light: UInt32, _ dark: UInt32, lightAlpha: CGFloat = 1, darkAlpha: CGFloat = 1) -> NSColor {
+  static func dynamic(_ light: UInt32, _ dark: UInt32, lightAlpha: CGFloat = 1, darkAlpha: CGFloat = 1) -> NSColor {
     NSColor(name: nil) { appearance in
       appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         ? rgb(dark, alpha: darkAlpha)
@@ -569,7 +569,10 @@ final class ExplorerSidebarRow: NSView, NSDraggingSource {
     ejectButton.frame = NSRect(x: max(bounds.minX, bounds.maxX - 32), y: bounds.midY - 12, width: 24, height: 24)
   }
 
-  override func mouseDown(with event: NSEvent) { mousePressed = true; downEvent = event; window?.makeFirstResponder(self) }
+  override func mouseDown(with event: NSEvent) {
+    if event.modifierFlags.contains(.control) { showContextMenu(with: event); return }
+    mousePressed = true; downEvent = event; window?.makeFirstResponder(self)
+  }
   override func mouseDragged(with event: NSEvent) {
     guard let path = placePath, let downEvent,
       hypot(event.locationInWindow.x - downEvent.locationInWindow.x, event.locationInWindow.y - downEvent.locationInWindow.y) >= 4 else { return }
@@ -588,7 +591,12 @@ final class ExplorerSidebarRow: NSView, NSDraggingSource {
     if shouldOpen { onOpen() }
   }
   override func otherMouseUp(with event: NSEvent) { if event.buttonNumber == 2 { onOpenTab?() } else { super.otherMouseUp(with: event) } }
-  override func menu(for event: NSEvent) -> NSMenu? { onContext?(event); return nil }
+  private func showContextMenu(with event: NSEvent) {
+    mousePressed = false; downEvent = nil
+    onContext?(event)
+  }
+  override func rightMouseDown(with event: NSEvent) { showContextMenu(with: event) }
+  override func menu(for event: NSEvent) -> NSMenu? { nil }
   func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { context == .withinApplication ? .move : [] }
   func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) { onDragExit?() }
   override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { draggingUpdated(sender) }
