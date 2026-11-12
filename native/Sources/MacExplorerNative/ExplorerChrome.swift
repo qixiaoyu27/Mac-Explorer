@@ -9,6 +9,7 @@ enum ExplorerPalette {
   static let surface = dynamic(0xffffff, 0x191919)
   static let mica = dynamic(0xeeeef2, 0x202024)
   static let border = dynamic(0xe5e5e5, 0x383838)
+  static let scrollbar = dynamic(0x0d0d0d, 0xffffff, lightAlpha: 0.30, darkAlpha: 0.30)
   static let hover = dynamic(0x000000, 0xffffff, lightAlpha: 8.0 / 255, darkAlpha: 13.0 / 255)
   static let pressed = dynamic(0x000000, 0xffffff, lightAlpha: 14.0 / 255, darkAlpha: 22.0 / 255)
   static let accent = dynamic(0x0067c0, 0x70c5ff)
@@ -34,7 +35,7 @@ enum ExplorerPalette {
     NSColor(srgbRed: CGFloat((value >> 16) & 255) / 255, green: CGFloat((value >> 8) & 255) / 255, blue: CGFloat(value & 255) / 255, alpha: alpha)
   }
 
-  private static func dynamic(_ light: UInt32, _ dark: UInt32, lightAlpha: CGFloat = 1, darkAlpha: CGFloat = 1) -> NSColor {
+  static func dynamic(_ light: UInt32, _ dark: UInt32, lightAlpha: CGFloat = 1, darkAlpha: CGFloat = 1) -> NSColor {
     NSColor(name: nil) { appearance in
       appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         ? rgb(dark, alpha: darkAlpha)
@@ -191,87 +192,154 @@ final class ExplorerButton: NSButton {
   }
 }
 
+final class ExplorerTabViewTemplateSettings {
+  fileprivate(set) var iconElement: NSImage?
+  fileprivate(set) var tabGeometry = NSBezierPath()
+}
+
 final class ExplorerTabView: NSView {
-  var onDragValidate: ((NSDraggingInfo) -> NSDragOperation)?
-  var onDrop: ((NSDraggingInfo) -> Bool)?
-  private var dragHover: DispatchWorkItem?
-  private var fileDragHovered = false
-  var canDetach: (() -> Bool)?
-  var onDetach: ((NSPoint) -> Bool)?
-  private var dragStart: NSPoint?
-  private let onClose: () -> Void
-  var badgeName: String? { didSet { needsDisplay = true } }
-  var locationIcon: String? { didSet { needsDisplay = true } }
-  var text: String {
+  private static let footRadius: CGFloat = 4
+  static let bodyWidth: CGFloat = 214
+  static let size = NSSize(width: bodyWidth + 2 * footRadius, height: 32)
+
+  var header: Any? { didSet { updateHeader() } }
+  var headerTemplate: ((Any?) -> NSView)? { didSet { updateHeader() } }
+  var iconSource: (() -> NSImage)? {
     didSet {
-      setAccessibilityLabel(text)
-      closeButton.setAccessibilityLabel("Close \(text)")
+      tabViewTemplateSettings.iconElement = iconSource?()
+      needsLayout = true
       needsDisplay = true
     }
   }
-  var selected: Bool { didSet { setAccessibilityValue(selected ? 1 : 0); needsDisplay = true } }
-  private let onSelect: () -> Void
-  private let closeButton: ExplorerButton
-  private var hovered = false
+  var isSelected = false {
+    didSet {
+      setAccessibilityValue(isSelected ? 1 : 0)
+      layer?.zPosition = isSelected ? 1 : 0
+      needsDisplay = true
+      previousTab?.needsDisplay = true
+    }
+  }
+  weak var previousTab: ExplorerTabView?
+  weak var nextTab: ExplorerTabView? { didSet { needsDisplay = true } }
+  var showsTrailingSeparator: Bool {
+    !isSelected && !hovered && nextTab?.isSelected != true && nextTab?.hovered != true
+  }
+  var isClosable = true {
+    didSet { closeButton.isHidden = !isClosable; needsLayout = true; needsDisplay = true }
+  }
+  let tabViewTemplateSettings = ExplorerTabViewTemplateSettings()
+
+  var onSelect: (() -> Void)?
+  var onClose: (() -> Void)?
+  var onDragValidate: ((NSDraggingInfo) -> NSDragOperation)?
+  var onDrop: ((NSDraggingInfo) -> Bool)?
+  var canDetach: (() -> Bool)?
+  var onDetach: ((NSPoint) -> Bool)?
+
+  private var dragHover: DispatchWorkItem?
+  private var fileDragHovered = false
+  private var dragStart: NSPoint?
+  private var headerView: NSView?
+  private var headerText = ""
+  private let closeButton = ExplorerButton(icon: "close")
+  private var hovered = false {
+    didSet {
+      needsDisplay = true
+      previousTab?.needsDisplay = true
+    }
+  }
   private var mousePressed = false
   private var hoverArea: NSTrackingArea?
 
-  init(title: String, active: Bool, onSelect: @escaping () -> Void, onClose: @escaping () -> Void) {
-    text = title
-    selected = active
-    self.onSelect = onSelect
-    self.onClose = onClose
-    closeButton = ExplorerButton(icon: "close", action: onClose)
-    super.init(frame: NSRect(x: 0, y: 0, width: 214, height: 36))
+  init() {
+    super.init(frame: NSRect(origin: .zero, size: Self.size))
+    wantsLayer = true
     focusRingType = .none
     closeButton.iconDimension = 13
-    closeButton.setAccessibilityLabel("Close \(title)")
+    closeButton.onPress = { [weak self] in self?.requestClose() }
     addSubview(closeButton)
     needsLayout = true
     setAccessibilityElement(true)
     setAccessibilityRole(.radioButton)
-    setAccessibilityLabel(title)
-    setAccessibilityValue(active ? 1 : 0)
+    setAccessibilityValue(0)
+    updateHeader()
     registerForDraggedTypes([.fileURL])
   }
 
-  required init?(coder: NSCoder) { fatalError("Use init(title:active:onSelect:onClose:)") }
+  required init?(coder: NSCoder) { fatalError("Use init()") }
 
   override var isFlipped: Bool { true }
   override var acceptsFirstResponder: Bool { true }
   override var mouseDownCanMoveWindow: Bool { false }
-  override var intrinsicContentSize: NSSize { NSSize(width: 214, height: 36) }
+  override var intrinsicContentSize: NSSize { Self.size }
+
+  private var tabBounds: NSRect { bounds.insetBy(dx: Self.footRadius, dy: 0) }
+
+  private var headerBounds: NSRect {
+    let body = tabBounds
+    let leading: CGFloat = tabViewTemplateSettings.iconElement == nil ? 14 : 45
+    let trailing: CGFloat = isClosable ? 43 : 14
+    return NSRect(x: body.minX + leading, y: body.minY, width: max(0, body.width - leading - trailing), height: body.height)
+  }
+
+  private func updateHeader() {
+    headerView?.removeFromSuperview()
+    headerView = headerTemplate?(header) ?? (header as? NSView)
+    if let headerView { addSubview(headerView, positioned: .below, relativeTo: closeButton) }
+    let fallback = header is NSView ? nil : header.map { String(describing: $0) }
+    headerText = (header as? String) ?? headerView?.accessibilityLabel() ?? fallback ?? ""
+    setAccessibilityLabel(headerText)
+    closeButton.setAccessibilityLabel("Close \(headerText)")
+    needsLayout = true
+    needsDisplay = true
+  }
 
   override func layout() {
     super.layout()
-    closeButton.frame = NSRect(x: bounds.maxX - 32, y: bounds.midY - 12, width: 25, height: 24)
+    let body = tabBounds
+    closeButton.frame = NSRect(x: body.maxX - 32, y: body.midY - 12, width: 25, height: 24)
+    headerView?.frame = headerBounds
+    tabViewTemplateSettings.tabGeometry = backgroundPath(in: body, footRadius: Self.footRadius)
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    guard tabBounds.contains(convert(point, from: superview)) else { return nil }
+    return super.hitTest(point)
   }
 
   override func updateTrackingAreas() {
     super.updateTrackingAreas()
     if let hoverArea { removeTrackingArea(hoverArea) }
-    let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+    let area = NSTrackingArea(rect: tabBounds.intersection(visibleRect), options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self)
     addTrackingArea(area)
     hoverArea = area
   }
 
-  override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
-  override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
+  override func mouseEntered(with event: NSEvent) { hovered = true }
+  override func mouseExited(with event: NSEvent) { hovered = false }
   override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { draggingUpdated(sender) }
   override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-    let operation = onDragValidate?(sender) ?? []
+    let operation = dropOperation(sender)
     guard !operation.isEmpty else { endFileDrag(); return [] }
     fileDragHovered = true; needsDisplay = true
-    if !selected, dragHover == nil {
-      let work = DispatchWorkItem { [weak self] in guard let self, self.fileDragHovered, self.window != nil else { return }; self.dragHover = nil; self.onSelect() }
+    if !isSelected, dragHover == nil {
+      let work = DispatchWorkItem { [weak self] in guard let self, self.fileDragHovered, self.window != nil else { return }; self.dragHover = nil; self.onSelect?() }
       dragHover = work; DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
     return operation
   }
   override func draggingExited(_ sender: NSDraggingInfo?) { endFileDrag() }
   override func draggingEnded(_ sender: NSDraggingInfo) { endFileDrag() }
-  override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { !(onDragValidate?(sender) ?? []).isEmpty }
-  override func performDragOperation(_ sender: NSDraggingInfo) -> Bool { endFileDrag(); return onDrop?(sender) ?? false }
+  override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { !dropOperation(sender).isEmpty }
+  override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    endFileDrag()
+    guard tabBounds.contains(convert(sender.draggingLocation, from: nil)) else { return false }
+    return onDrop?(sender) ?? false
+  }
+  private func dropOperation(_ sender: NSDraggingInfo) -> NSDragOperation {
+    guard tabBounds.contains(convert(sender.draggingLocation, from: nil)) else { return [] }
+    return onDragValidate?(sender) ?? []
+  }
   private func endFileDrag() { dragHover?.cancel(); dragHover = nil; fileDragHovered = false; needsDisplay = true }
   override func viewWillMove(toWindow newWindow: NSWindow?) { if newWindow == nil { endFileDrag() }; super.viewWillMove(toWindow: newWindow) }
   deinit { dragHover?.cancel() }
@@ -289,56 +357,137 @@ final class ExplorerTabView: NSView {
     _ = onDetach?(window.convertPoint(toScreen: event.locationInWindow))
   }
   override func mouseUp(with event: NSEvent) {
-    let shouldSelect = mousePressed && bounds.contains(convert(event.locationInWindow, from: nil))
+    let shouldSelect = mousePressed && tabBounds.contains(convert(event.locationInWindow, from: nil))
     mousePressed = false; dragStart = nil
-    if shouldSelect { onSelect() }
+    if shouldSelect { onSelect?() }
   }
   override func otherMouseUp(with event: NSEvent) {
-    if event.buttonNumber == 2 && bounds.contains(convert(event.locationInWindow, from: nil)) { onClose() } else { super.otherMouseUp(with: event) }
+    if event.buttonNumber == 2 && tabBounds.contains(convert(event.locationInWindow, from: nil)) { requestClose() }
+    else { super.otherMouseUp(with: event) }
+  }
+  private func requestClose() {
+    guard isClosable else { return }
+    onClose?()
   }
   override func keyDown(with event: NSEvent) {
     if event.keyCode == 53 { dragStart = nil; mousePressed = false; return }
-    if [36, 49, 76].contains(event.keyCode) { onSelect() }
+    if [36, 49, 76].contains(event.keyCode) { onSelect?() }
     else { super.keyDown(with: event) }
   }
-  override func accessibilityPerformPress() -> Bool { onSelect(); return true }
+  override func accessibilityPerformPress() -> Bool {
+    guard let onSelect else { return false }
+    onSelect()
+    return true
+  }
   override func becomeFirstResponder() -> Bool { needsDisplay = true; return true }
   override func resignFirstResponder() -> Bool { mousePressed = false; needsDisplay = true; return true }
   override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); needsDisplay = true }
 
   override func draw(_ dirtyRect: NSRect) {
     effectiveAppearance.performAsCurrentDrawingAppearance {
-      if selected || hovered || fileDragHovered {
-        (fileDragHovered ? ExplorerPalette.selection : selected ? ExplorerPalette.surface : ExplorerPalette.tabHover).setFill()
-        let shape = NSBezierPath()
-        let r: CGFloat = min(8, bounds.width / 2)
-        let k: CGFloat = 0.5522847498
-        shape.move(to: NSPoint(x: bounds.minX, y: bounds.maxY))
-        shape.line(to: NSPoint(x: bounds.minX, y: bounds.minY + r))
-        shape.curve(to: NSPoint(x: bounds.minX + r, y: bounds.minY), controlPoint1: NSPoint(x: bounds.minX, y: bounds.minY + r * (1 - k)), controlPoint2: NSPoint(x: bounds.minX + r * (1 - k), y: bounds.minY))
-        shape.line(to: NSPoint(x: bounds.maxX - r, y: bounds.minY))
-        shape.curve(to: NSPoint(x: bounds.maxX, y: bounds.minY + r), controlPoint1: NSPoint(x: bounds.maxX - r * (1 - k), y: bounds.minY), controlPoint2: NSPoint(x: bounds.maxX, y: bounds.minY + r * (1 - k)))
-        shape.line(to: NSPoint(x: bounds.maxX, y: bounds.maxY))
-        shape.close()
-        shape.fill()
-      }
-      if !selected {
+      let body = tabBounds
+      drawBackground(in: body)
+      if showsTrailingSeparator {
         ExplorerPalette.border.setFill()
-        NSRect(x: bounds.maxX - 1, y: bounds.minY + 11, width: 1, height: 15).fill()
+        NSRect(x: body.maxX - 1, y: body.minY + 8, width: 1, height: max(0, body.height - 16)).fill()
       }
-      let iconRect = NSRect(x: bounds.minX + 14, y: bounds.midY - 10.5, width: 21, height: 21)
-      drawExplorerImage(locationIcon.map { ExplorerIcons.image($0, size: 18, color: ExplorerPalette.secondary) } ?? ExplorerIcons.folder(size: 21), in: iconRect)
-      if let badgeName {
-        let badge = NSRect(x: iconRect.maxX - 11, y: iconRect.maxY - 12.5, width: 11, height: 11)
-        ExplorerPalette.sidebar.setFill(); NSBezierPath(roundedRect: badge, xRadius: 3.5, yRadius: 3.5).fill()
-        ExplorerPalette.border.setStroke(); NSBezierPath(roundedRect: badge.insetBy(dx: 0.25, dy: 0.25), xRadius: 3.5, yRadius: 3.5).stroke()
-        drawExplorerImage(ExplorerIcons.image(badgeName, size: 7, color: NSColor(srgbRed: 82 / 255, green: 125 / 255, blue: 170 / 255, alpha: 1)), in: badge.insetBy(dx: 2, dy: 2))
+      if let icon = tabViewTemplateSettings.iconElement {
+        drawExplorerImage(icon, in: NSRect(x: body.minX + 14, y: body.midY - 10.5, width: 21, height: 21))
       }
-      drawExplorerText(text, in: NSRect(x: bounds.minX + 45, y: bounds.minY, width: max(0, bounds.width - 88), height: bounds.height))
+      if headerView == nil { drawExplorerText(headerText, in: headerBounds) }
       if window?.firstResponder === self && ExplorerFocus.keyboardVisible {
-        drawExplorerFocus(in: NSRect(x: bounds.minX + 2, y: bounds.minY + 2, width: max(0, bounds.width - 36), height: bounds.height - 4))
+        drawExplorerFocus(in: NSRect(x: body.minX + 2, y: body.minY + 2, width: max(0, body.width - 36), height: body.height - 4))
       }
     }
+  }
+
+  private func backgroundPath(in body: NSRect, footRadius: CGFloat) -> NSBezierPath {
+    let topRadius = max(0, min(8, body.width / 2, body.height - footRadius))
+    let path = NSBezierPath()
+    path.move(to: NSPoint(x: body.minX - footRadius, y: body.maxY))
+    if footRadius > 0 {
+      path.appendArc(from: NSPoint(x: body.minX, y: body.maxY),
+                     to: NSPoint(x: body.minX, y: body.minY), radius: footRadius)
+    }
+    path.appendArc(from: NSPoint(x: body.minX, y: body.minY),
+                   to: NSPoint(x: body.maxX, y: body.minY), radius: topRadius)
+    path.appendArc(from: NSPoint(x: body.maxX, y: body.minY),
+                   to: NSPoint(x: body.maxX, y: body.maxY), radius: topRadius)
+    if footRadius > 0 {
+      path.appendArc(from: NSPoint(x: body.maxX, y: body.maxY),
+                     to: NSPoint(x: body.maxX + footRadius, y: body.maxY), radius: footRadius)
+    } else {
+      path.line(to: NSPoint(x: body.maxX, y: body.maxY))
+    }
+    path.close()
+    return path
+  }
+
+  private func drawBackground(in body: NSRect) {
+    guard isSelected || hovered || fileDragHovered else { return }
+    (fileDragHovered ? ExplorerPalette.selection : isSelected ? ExplorerPalette.surface : ExplorerPalette.tabHover).setFill()
+    if isSelected {
+      tabViewTemplateSettings.tabGeometry.fill()
+    } else {
+      backgroundPath(in: body, footRadius: 0).fill()
+    }
+  }
+
+  static func makeLocationIcon(named name: String?, badge: String?) -> NSImage {
+    let image = NSImage(size: NSSize(width: 21, height: 21), flipped: true) { rect in
+      drawExplorerImage(name.map { ExplorerIcons.image($0, size: 18, color: ExplorerPalette.secondary) } ?? ExplorerIcons.folder(size: 21), in: rect)
+      if let badge {
+        let badgeRect = NSRect(x: rect.maxX - 11, y: rect.maxY - 12.5, width: 11, height: 11)
+        ExplorerPalette.sidebar.setFill()
+        NSBezierPath(roundedRect: badgeRect, xRadius: 3.5, yRadius: 3.5).fill()
+        ExplorerPalette.border.setStroke()
+        NSBezierPath(roundedRect: badgeRect.insetBy(dx: 0.25, dy: 0.25), xRadius: 3.5, yRadius: 3.5).stroke()
+        let color = NSColor(srgbRed: 82 / 255, green: 125 / 255, blue: 170 / 255, alpha: 1)
+        drawExplorerImage(ExplorerIcons.image(badge, size: 7, color: color), in: badgeRect.insetBy(dx: 2, dy: 2))
+      }
+      return true
+    }
+    image.cacheMode = .never
+    return image
+  }
+}
+
+final class ExplorerSidebarScrollView: ExplorerScrollView {
+  private weak var hoveredRow: ExplorerSidebarRow?
+
+  override init(frame: NSRect) {
+    super.init(frame: frame)
+    addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
+  }
+
+  required init?(coder: NSCoder) { fatalError() }
+
+  override func reflectScrolledClipView(_ clip: NSClipView) {
+    super.reflectScrolledClipView(clip)
+    if clip === contentView { updateHover() }
+  }
+
+  override func mouseMoved(with event: NSEvent) { updateHover() }
+  override func mouseEntered(with event: NSEvent) { updateHover() }
+  override func mouseExited(with event: NSEvent) { updateHover() }
+  override func viewDidHide() { super.viewDidHide(); updateHover() }
+
+  private func updateHover() {
+    let row = rowUnderPointer()
+    guard hoveredRow !== row else { return }
+    hoveredRow?.hovered = false
+    hoveredRow = row
+    row?.hovered = true
+  }
+
+  private func rowUnderPointer() -> ExplorerSidebarRow? {
+    guard let window, window.isKeyWindow, let superview, !isHiddenOrHasHiddenAncestor else { return nil }
+    var hit = hitTest(superview.convert(window.mouseLocationOutsideOfEventStream, from: nil))
+    while let view = hit, view !== self {
+      if let row = view as? ExplorerSidebarRow { return row }
+      hit = view.superview
+    }
+    return nil
   }
 }
 
@@ -369,9 +518,8 @@ final class ExplorerSidebarRow: NSView, NSDraggingSource {
   private let onOpen: () -> Void
   private let disclosureButton = ExplorerButton(icon: "chevronRight")
   private let ejectButton = ExplorerButton(icon: "eject")
-  private var hovered = false
+  fileprivate(set) var hovered = false { didSet { updateDisclosure() } }
   private var mousePressed = false
-  private var hoverArea: NSTrackingArea?
 
   init(title: String, icon: String, level: Int = 0, pinned: Bool = false, onOpen: @escaping () -> Void) {
     text = title
@@ -421,17 +569,10 @@ final class ExplorerSidebarRow: NSView, NSDraggingSource {
     ejectButton.frame = NSRect(x: max(bounds.minX, bounds.maxX - 32), y: bounds.midY - 12, width: 24, height: 24)
   }
 
-  override func updateTrackingAreas() {
-    super.updateTrackingAreas()
-    if let hoverArea { removeTrackingArea(hoverArea) }
-    let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
-    addTrackingArea(area)
-    hoverArea = area
+  override func mouseDown(with event: NSEvent) {
+    if event.modifierFlags.contains(.control) { showContextMenu(with: event); return }
+    mousePressed = true; downEvent = event; window?.makeFirstResponder(self)
   }
-
-  override func mouseEntered(with event: NSEvent) { hovered = true; updateDisclosure() }
-  override func mouseExited(with event: NSEvent) { hovered = false; updateDisclosure() }
-  override func mouseDown(with event: NSEvent) { mousePressed = true; downEvent = event; window?.makeFirstResponder(self) }
   override func mouseDragged(with event: NSEvent) {
     guard let path = placePath, let downEvent,
       hypot(event.locationInWindow.x - downEvent.locationInWindow.x, event.locationInWindow.y - downEvent.locationInWindow.y) >= 4 else { return }
@@ -450,7 +591,12 @@ final class ExplorerSidebarRow: NSView, NSDraggingSource {
     if shouldOpen { onOpen() }
   }
   override func otherMouseUp(with event: NSEvent) { if event.buttonNumber == 2 { onOpenTab?() } else { super.otherMouseUp(with: event) } }
-  override func menu(for event: NSEvent) -> NSMenu? { onContext?(event); return nil }
+  private func showContextMenu(with event: NSEvent) {
+    mousePressed = false; downEvent = nil
+    onContext?(event)
+  }
+  override func rightMouseDown(with event: NSEvent) { showContextMenu(with: event) }
+  override func menu(for event: NSEvent) -> NSMenu? { nil }
   func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { context == .withinApplication ? .move : [] }
   func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) { onDragExit?() }
   override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { draggingUpdated(sender) }

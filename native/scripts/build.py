@@ -58,7 +58,12 @@ info = {
     "LSMinimumSystemVersion": "13.0",
     "NSHighResolutionCapable": True,
     "NSPrincipalClass": "NSApplication",
-    "CFBundleDocumentTypes": [{"CFBundleTypeName": "Files and Folders", "CFBundleTypeRole": "Viewer", "LSHandlerRank": "Alternate", "LSItemContentTypes": ["public.data", "public.folder", "public.volume", "public.text", "public.image", "public.audio", "public.movie", "public.archive", "com.adobe.pdf", "com.apple.package"]}],
+    "CFBundleDocumentTypes": [{
+        "CFBundleTypeName": "Files and Folders",
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Alternate",
+        "LSItemContentTypes": ["public.data", "public.folder", "public.volume", "public.text", "public.image", "public.audio", "public.movie", "public.archive", "com.adobe.pdf", "com.apple.package", "com.microsoft.windows-executable"],
+    }],
     "NSLocalNetworkUsageDescription": "查找附近设备并连接局域网共享电脑和文件服务器。",
     "NSBonjourServices": ["_smb._tcp"],
     "NSDesktopFolderUsageDescription": "浏览桌面中的文件。",

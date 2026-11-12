@@ -31,10 +31,10 @@ enum NativeNavigationStateChecks {
       }
       window.contentView?.layoutSubtreeIfNeeded(); browser.collection.layoutSubtreeIfNeeded()
     }
-    func scroll() -> NSScrollView { browser.mode == .details ? browser.tableScroll : browser.collectionScroll }
+    func scroll() -> NSScrollView { browser.fileScroll }
     func frame(_ index: Int) -> NSRect { browser.mode == .details ? browser.table.rect(ofRow: index) : browser.collectionLayout.layoutAttributesForItem(at: IndexPath(item: index, section: 0))!.frame }
     func origin() -> NSPoint { scroll().contentView.bounds.origin }
-    func top() -> NSPoint { NSPoint(x: 0, y: browser.mode == .details ? -(browser.table.headerView?.frame.height ?? 0) : 0) }
+    func top() -> NSPoint { NSPoint(x: -scroll().contentInsets.left, y: browser.mode == .details ? -(browser.table.headerView?.frame.height ?? 0) : 0) }
     func firstRowVisible() -> Bool {
       guard browser.table.numberOfRows > 0 else { return false }
       let row = browser.table.rect(ofRow: 0), visible = browser.table.visibleRect
@@ -43,9 +43,8 @@ enum NativeNavigationStateChecks {
     }
     func close(_ a: NSPoint, _ b: NSPoint) -> Bool { abs(a.x - b.x) < 2 && abs(a.y - b.y) < 2 }
     func position(_ index: Int) -> NSPoint {
-      let rect = frame(index), view = scroll(), document = view.documentView!
-      let point = NSPoint(x: min(max(0, rect.minX - 50), max(0, document.bounds.width - view.contentSize.width)), y: min(max(0, rect.minY - 70), max(0, document.bounds.height - view.contentSize.height)))
-      view.contentView.scroll(to: point); view.reflectScrolledClipView(view.contentView)
+      let rect = frame(index)
+      browser.content.scrollTo(NSPoint(x: rect.minX - 50, y: rect.minY - 70))
       return origin()
     }
     func select(_ path: String) { browser.selectedPaths = [path]; browser.updateMode(persist: false); window.contentView?.layoutSubtreeIfNeeded() }
@@ -126,6 +125,43 @@ enum NativeNavigationStateChecks {
     let doomed = root.appendingPathComponent("Folder 300"); select(doomed.path); _ = position(300)
     browser.openSelected(); try await loaded(doomed); try fm.removeItem(at: doomed); browser.up(); try await loaded(root)
     try check(browser.selectedPaths.isEmpty && origin().y.isFinite && origin().y >= top().y, "A removed child is pruned from selection and the parent scroll remains valid")
+
+    let media = root.appendingPathComponent("Media.localized"), inbox = media.appendingPathComponent("Automatically Add to Music.localized")
+    try fm.createDirectory(at: inbox.appendingPathComponent(".localized"), withIntermediateDirectories: true)
+    browser.navigate(to: media); try await loaded(media)
+    browser.setView(.icons, size: 64); window.contentView?.layoutSubtreeIfNeeded()
+    func expandedNames() -> [String] { browser.collection.subviews.compactMap { ($0 as? NativeExpandedNameView)?.text.stringValue } }
+    browser.selectedPaths = [inbox.path]; browser.collection.layoutSubtreeIfNeeded()
+    try check(expandedNames() == [inbox.lastPathComponent], "Selecting a long folder name in Icons expands its label")
+    browser.selectedPaths = []
+    try check(expandedNames().isEmpty, "Deselecting a long folder name removes its expanded label without another layout pass")
+    browser.selectedPaths = [inbox.path]; browser.collection.layoutSubtreeIfNeeded()
+    if showsWindows {
+      window.makeKeyAndOrderFront(nil)
+      let cell = frame(0)
+      let point = browser.collection.convert(NSPoint(x: cell.midX, y: cell.midY), to: nil)
+      for type: NSEvent.EventType in [.leftMouseDown, .leftMouseUp] {
+        let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                       windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 2,
+                                       pressure: type == .leftMouseDown ? 1 : 0)!
+        NSApp.sendEvent(event)
+      }
+    } else {
+      browser.openSelected()
+    }
+    try check(expandedNames().isEmpty, "Opening a selected folder clears its expanded label before the destination loads")
+    try check(browser.loading && browser.loadingView.isHidden && browser.emptyLabel.isHidden,
+              "Opening a local folder does not immediately flash a loading placeholder or empty state")
+    try await loaded(inbox)
+    try check(browser.entries.isEmpty && browser.selectedPaths.isEmpty && expandedNames().isEmpty,
+              "Entering a folder with only hidden contents removes its expanded label from the previous directory")
+    try await Task.sleep(nanoseconds: 200_000_000)
+    try check(browser.loadingView.isHidden && !browser.emptyLabel.isHidden,
+              "A completed empty folder cannot show a stale loading placeholder")
+    browser.back(); try await loaded(media)
+    try check(browser.selectedPaths == [inbox.path] && expandedNames() == [inbox.lastPathComponent],
+              "Back restores the folder selection and expands the current label once")
+
     try check(try Data(contentsOf: child.appendingPathComponent("Item 080.txt")) == Data("fixture".utf8), "Navigation checks preserve fixture contents")
     return checks
   }

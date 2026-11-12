@@ -26,7 +26,7 @@ enum NativeLifecycleChecks {
     func check(_ condition: Bool, _ text: String) throws { guard condition else { throw failure(text) }; checks.append(text) }
     try check(NSApp.mainMenu?.items.first?.submenu?.items.contains(where: { $0.title == NL("设置…") && $0.keyEquivalent == "," }) == true, "Application menu exposes Settings on Command+comma")
     guard let dock = delegate.applicationDockMenu(NSApp) else { throw failure("No Native Dock menu") }
-    try check(dock.items.map(\.title) == [NL("新建窗口"), NL("新建标签页")], "Dock exposes New Window and New Tab")
+    try check(dock.items.map(\.title) == [NL("新建窗口"), NL("新建选项卡")], "Dock exposes New Window and New Tab")
     dock.performActionForItem(at: 1)
     try check(delegate.browser.tabs.count == 2 && delegate.browser.directory.path == root.path, "Dock New Tab opens the personal folder in the active fixture window")
     dock.performActionForItem(at: 0)

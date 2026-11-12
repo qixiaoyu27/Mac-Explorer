@@ -190,7 +190,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
   func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
     let menu = NSMenu()
     menu.addItem(withTitle: NL("新建窗口"), action: #selector(newWindow), keyEquivalent: "").target = self
-    menu.addItem(withTitle: NL("新建标签页"), action: #selector(dockNewTab), keyEquivalent: "").target = self
+    menu.addItem(withTitle: NL("新建选项卡"), action: #selector(dockNewTab), keyEquivalent: "").target = self
     return menu
   }
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
@@ -310,9 +310,9 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     addMenu("Mac Explorer", submenu: app, to: main)
     let file = NSMenu(title: NL("文件"))
     file.addItem(withTitle: NL("新建窗口"), action: #selector(newWindow), keyEquivalent: "n").target = self
-    item(NL("新建标签页"), #selector(BrowserController.newTab), "t", in: file)
+    item(NL("新建选项卡"), #selector(BrowserController.newTab), "t", in: file)
     let choose = file.addItem(withTitle: NL("打开文件夹…"), action: #selector(chooseDirectory), keyEquivalent: ""); choose.target = self
-    item(NL("关闭标签页"), #selector(BrowserController.closeTab), "w", in: file)
+    item(NL("关闭选项卡"), #selector(BrowserController.closeTab), "w", in: file)
     file.addItem(.separator())
     item(NL("打开选中项目"), #selector(BrowserController.openSelected), "\r", in: file)
     item(NL("快速查看"), #selector(BrowserController.previewSelected), "y", in: file)

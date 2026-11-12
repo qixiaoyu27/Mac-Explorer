@@ -15,8 +15,11 @@ private final class FixtureDrag: NSObject, NSDraggingInfo {
   var animatesToDestination = false
   var numberOfValidItemsForDrop = 0
   var springLoadingHighlight: NSSpringLoadingHighlight { .none }
-  init(row: NSView, y: CGFloat, board: NSPasteboard) {
-    draggingDestinationWindow = row.window; draggingLocation = row.convert(NSPoint(x: 45, y: y), to: nil); draggingPasteboard = board; draggingSequenceNumber = board.changeCount
+  convenience init(row: NSView, y: CGFloat, board: NSPasteboard) {
+    self.init(view: row, point: NSPoint(x: 45, y: y), board: board)
+  }
+  init(view: NSView, point: NSPoint, board: NSPasteboard) {
+    draggingDestinationWindow = view.window; draggingLocation = view.convert(point, to: nil); draggingPasteboard = board; draggingSequenceNumber = board.changeCount
   }
   func slideDraggedImage(to screenPoint: NSPoint) {}
   nonisolated override func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
@@ -55,8 +58,8 @@ enum NativeInteractionChecks {
       let buttons = descendants(body).compactMap { $0 as? NSButton }.filter { titles.contains($0.title) }
       try check(buttons.count == titles.count, "All quick-action buttons are present")
       for button in buttons {
-        let textWidth = (button.title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 10)]).width
-        try check(button.bounds.width >= textWidth + 12, "Quick-action hover background contains \(button.title) with padding")
+        let textWidth = (button.title as NSString).size(withAttributes: [.font: ExplorerTypography.font(ofSize: 12)]).width
+        try check(button.bounds.width == min(120, max(60, ceil(textWidth))), "Quick-action button fits \(button.title) within the template limits")
       }
       ExplorerMenu.dismiss()
     }
@@ -102,6 +105,9 @@ enum NativeInteractionChecks {
     try check(fm.fileExists(atPath: extra.path) && browser.pinnedPaths[1] == extra.path, "Pinned folder remains at its original filesystem location")
     try check(await browser.pinFolders([root.appendingPathComponent("Package.app")], at: 0) == false, "Application packages cannot be pinned as folders")
     try check(await browser.pinFolders([root.appendingPathComponent(".Trash")], at: 0) == false, "Trash cannot be pinned through folder drops")
+    board.clearContents(); board.writeObjects([URL(fileURLWithPath: downloads) as NSURL])
+    let sidebarFolder = try place(downloads), sidebarSelf = FixtureDrag(row: sidebarFolder, y: 18, board: board)
+    try check(sidebarFolder.draggingUpdated(sidebarSelf).isEmpty && !sidebarFolder.performDragOperation(sidebarSelf), "The sidebar rejects a folder dragged onto itself")
     let incoming = root.appendingPathComponent("incoming.txt"); try Data("incoming payload".utf8).write(to: incoming)
     board.clearContents(); board.writeObjects([incoming as NSURL])
     let destination = try place(downloads), fileDrag = FixtureDrag(row: destination, y: 18, board: board)
@@ -116,12 +122,12 @@ enum NativeInteractionChecks {
     window.contentView?.layoutSubtreeIfNeeded()
     // Compare the refresh with the settled viewport immediately before the external
     // mutation, rather than an earlier pending AppKit selection/scroll adjustment.
-    let scroll = browser.tableScroll.contentView.bounds.origin
+    let scroll = browser.fileScroll.contentView.bounds.origin
     try check(browser.selectedPaths == selection && !selection.isEmpty && scroll.y > 100, "External refresh fixture starts with a settled nonempty selection and scrolled viewport")
     try Data("external".utf8).write(to: docs.appendingPathComponent("zz-external.txt"))
     try await until { browser.entries.contains { $0.name == "zz-external.txt" } }
-    guard browser.selectedPaths == selection && abs(browser.tableScroll.contentView.bounds.origin.y - scroll.y) < 1 else {
-      throw NativeSmoke.Failure(description: "External create refreshes in place without losing selection or scroll; before=\(scroll), after=\(browser.tableScroll.contentView.bounds.origin), selectedBefore=\(selection), selectedAfter=\(browser.selectedPaths)")
+    guard browser.selectedPaths == selection && abs(browser.fileScroll.contentView.bounds.origin.y - scroll.y) < 1 else {
+      throw NativeSmoke.Failure(description: "External create refreshes in place without losing selection or scroll; before=\(scroll), after=\(browser.fileScroll.contentView.bounds.origin), selectedBefore=\(selection), selectedAfter=\(browser.selectedPaths)")
     }
     try check(true, "External create refreshes in place without losing selection or scroll")
     let renaming = browser.entries.firstIndex { $0.id == selection.first }!
@@ -157,15 +163,22 @@ enum NativeInteractionChecks {
     try await until { browser.entries.contains { $0.name == "zz-modal.txt" } }
     try fm.removeItem(at: docs.appendingPathComponent("zz-modal.txt"))
     try await until { !browser.entries.contains { $0.name == "zz-modal.txt" } }
-    try fm.moveItem(at: docs.appendingPathComponent("zz-external.txt"), to: docs.appendingPathComponent("zz-renamed.txt"))
+    let external = docs.appendingPathComponent("zz-external.txt"), renamed = docs.appendingPathComponent("zz-renamed.txt")
+    browser.selectedPaths = [external.path]
+    try fm.moveItem(at: external, to: renamed)
     try await until { browser.entries.contains { $0.name == "zz-renamed.txt" } && !browser.entries.contains { $0.name == "zz-external.txt" } }
-    try fm.removeItem(at: docs.appendingPathComponent("zz-renamed.txt"))
+    try check(browser.selectedPaths == [renamed.path], "External rename transfers selection to the same file at its new path")
+    let oldIdentity = browser.entries.first { $0.id == renamed.path }?.resourceIdentifier
+    try Data("atomic replacement".utf8).write(to: renamed, options: .atomic)
+    try await until { browser.entries.contains { $0.id == renamed.path && $0.resourceIdentifier != oldIdentity } }
+    try check(browser.selectedPaths.isEmpty, "Same-path atomic replacement does not inherit an explicit file selection")
+    try fm.removeItem(at: renamed)
     try await until { !browser.entries.contains { $0.name == "zz-renamed.txt" } }
     try check(true, "External rename and removal refresh the native list")
     browser.openTab(at: extra); browser.navigate(to: docs)
     try await until { !browser.loading && browser.entries.count == 121 }
     browser.table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-    let tab = browser.tabs[browser.activeTab]
+    let tab = browser.tabs[browser.activeTab], tabSelection = browser.selectedPaths
     let beforeWindows = app.browserWindows.count
     guard let tabView = browser.tabsDocument.subviews.compactMap({ $0 as? ExplorerTabView }).last else { throw NativeSmoke.Failure(description: "No tab view") }
     let downPoint = tabView.convert(NSPoint(x: 50, y: 18), to: nil), dragPoint = browser.view.convert(NSPoint(x: 360, y: 105), to: nil)
@@ -175,7 +188,7 @@ enum NativeInteractionChecks {
     guard let detachedWindow = app.browserWindows.last, let detached = detachedWindow.contentViewController as? BrowserController else { throw NativeSmoke.Failure(description: "No detached window") }
     windows.append(detachedWindow)
     try await until { !detached.loading && detached.snapshot != nil }
-    try check(detached.tabs[0].id == tab.id && detached.tabs[0].history == tab.history && detached.tabs[0].index == tab.index && detached.selectedPaths == tab.selectedPaths, "Dragging a tab out preserves its identity, history, and selection")
+    try check(detached.tabs[0].id == tab.id && detached.tabs[0].history == tab.history && detached.tabs[0].index == tab.index && detached.selectedPaths == tabSelection, "Dragging a tab out preserves its identity, history, and selection")
     try check(browser.tabs.count == 1 && window.isVisible, "Tab detach leaves the source window and remaining tab intact")
     detached.back()
     try await until { !detached.loading && detached.directory.path == extra.path }
@@ -209,6 +222,45 @@ enum NativeInteractionChecks {
     try await until { browser.entries.contains { $0.name == "zz-after-close.txt" } }
     try check(detached.automaticRefreshCount == refreshes && window.isVisible, "Closing one window stops its watcher without stopping other windows")
     try check(try (0..<120).allSatisfy { try Data(contentsOf: docs.appendingPathComponent("item\($0).txt")) == Data("payload \($0)".utf8) }, "All 120 original fixture files remain unchanged")
+
+    browser.navigate(to: root)
+    try await until { !browser.loading && browser.snapshot?.directory.path == root.path }
+    func row(for url: URL) throws -> Int {
+      guard let row = browser.displayRows.firstIndex(where: { $0.entry.map { browser.entries[$0].url.path == url.path } == true }) else {
+        throw NativeSmoke.Failure(description: "Missing fixture folder for drop validation")
+      }
+      return row
+    }
+    board.clearContents(); board.writeObjects([docs as NSURL])
+    browser.setView(.details); browser.setGrouping(.none); window.contentView?.layoutSubtreeIfNeeded()
+    let sourceRow = try row(for: docs), neighborRow = try row(for: extra)
+    let sourceRect = browser.table.rect(ofRow: sourceRow), neighborRect = browser.table.rect(ofRow: neighborRow)
+    let detailsNeighbor = FixtureDrag(view: browser.table, point: NSPoint(x: 60, y: neighborRect.midY), board: board)
+    let detailsSelf = FixtureDrag(view: browser.table, point: NSPoint(x: 60, y: sourceRect.midY), board: board)
+    try check(!browser.tableView(browser.table, validateDrop: detailsNeighbor, proposedRow: sourceRow, proposedDropOperation: .above).isEmpty, "Details validates the folder under the pointer despite a stale proposed row")
+    try check(browser.tableView(browser.table, validateDrop: detailsSelf, proposedRow: neighborRow, proposedDropOperation: .on).isEmpty
+      && browser.table.draggingDestinationFeedbackStyle == .none
+      && !browser.tableView(browser.table, acceptDrop: detailsSelf, row: neighborRow, dropOperation: .on), "Details clears the previous target and rejects a drop onto the source folder")
+
+    browser.setView(.icons, size: 64); window.contentView?.layoutSubtreeIfNeeded()
+    let sourceIndex = IndexPath(item: try row(for: docs), section: 0), neighborIndex = IndexPath(item: try row(for: extra), section: 0)
+    guard let sourceFrame = browser.collection.layoutAttributesForItem(at: sourceIndex)?.frame,
+          let neighborFrame = browser.collection.layoutAttributesForItem(at: neighborIndex)?.frame,
+          let neighborItem = browser.collection.item(at: neighborIndex) else { throw NativeSmoke.Failure(description: "Missing visible icon drop fixture") }
+    let iconNeighbor = FixtureDrag(view: browser.collection, point: NSPoint(x: neighborFrame.midX, y: neighborFrame.midY), board: board)
+    let iconSelf = FixtureDrag(view: browser.collection, point: NSPoint(x: sourceFrame.midX, y: sourceFrame.midY), board: board)
+    var proposedIndex = sourceIndex as NSIndexPath, proposedOperation = NSCollectionView.DropOperation.before
+    try check(!browser.collectionView(browser.collection, validateDrop: iconNeighbor, proposedIndexPath: &proposedIndex, dropOperation: &proposedOperation).isEmpty
+      && proposedIndex == neighborIndex as NSIndexPath && proposedOperation == .on, "Icons retargets the proposal to the folder under the pointer")
+    neighborItem.highlightState = .asDropTarget
+    try check(browser.collectionView(browser.collection, validateDrop: iconSelf, proposedIndexPath: &proposedIndex, dropOperation: &proposedOperation).isEmpty
+      && neighborItem.highlightState == .none
+      && !browser.collectionView(browser.collection, acceptDrop: iconSelf, indexPath: neighborIndex, dropOperation: .on), "Icons clears a stale highlight and rejects a drop onto the source folder")
+    let gap = NSPoint(x: browser.collection.visibleRect.maxX - 3, y: neighborFrame.midY)
+    let iconGap = FixtureDrag(view: browser.collection, point: gap, board: board)
+    try check(!browser.collectionView(browser.collection, validateDrop: iconGap, proposedIndexPath: &proposedIndex, dropOperation: &proposedOperation).isEmpty
+      && proposedIndex.item == browser.displayRows.count && proposedOperation == .before
+      && browser.collectionLayout.layoutAttributesForDropTarget(at: gap)?.isHidden == true, "Icon view whitespace targets the current folder without an insertion marker")
     return checks
   }
   private static func mouse(_ type: NSEvent.EventType, point: NSPoint, window: NSWindow, button: Int = 0) -> NSEvent {

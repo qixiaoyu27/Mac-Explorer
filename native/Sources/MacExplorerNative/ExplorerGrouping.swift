@@ -4,6 +4,7 @@ import ExplorerCore
 struct ExplorerDisplayRow {
   var entry: Int?
   var group: Int?
+  var selectionGroup: String?
 }
 
 final class ExplorerGroupCell: NSTableCellView {

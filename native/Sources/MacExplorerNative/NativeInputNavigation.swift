@@ -77,7 +77,14 @@ final class NativeInputNavigation {
     let inside = content.bounds.contains(point), hit = inside ? content.hitTest(content.superview?.convert(event.locationInWindow, from: nil) ?? point) : nil
     var horizontalScroll = false, view = hit
     while let current = view {
-      if let scroll = current as? NSScrollView, let document = scroll.documentView, document.bounds.width > scroll.contentView.bounds.width + 1 { horizontalScroll = true; break }
+      if let scroll = (current as? NSScrollView) ?? (current as? ExplorerScroller)?.scrollView,
+         let document = scroll.documentView {
+        let insets = scroll.contentInsets
+        if document.bounds.width + insets.left + insets.right > scroll.contentView.bounds.width + 1 {
+          horizontalScroll = true
+          break
+        }
+      }
       if current === content { break }; view = current.superview
     }
     let modified = !event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
@@ -113,7 +120,7 @@ enum NativeInputNavigationChecks {
       try await NativeSmoke.until { !browser.loading }
       window.contentView?.layoutSubtreeIfNeeded()
       do {
-        let scroll = mode == .details ? browser.tableScroll : browser.collectionScroll
+        let scroll = browser.fileScroll
         let originalStyle = scroll.scrollerStyle
         defer {
           scroll.scrollerStyle = originalStyle

@@ -23,11 +23,11 @@ final class NativeArchiveWindow: NSWindowController, NSWindowDelegate, NSTableVi
   private let back = NSButton(title: "", target: nil, action: nil)
   private let location = label("", size: 13)
   private let all = NSButton(checkboxWithTitle: NL("全选"), target: nil, action: nil)
-  private let target = NSPopUpButton(frame: .zero, pullsDown: false)
+  private let target = ExplorerPopUpButton(frame: .zero, pullsDown: false)
   private let extractAll = NSButton(title: NL("全部解压"), target: nil, action: nil)
   private let extractSelected = NSButton(title: NL("解压所选"), target: nil, action: nil)
   private let table = ArchiveTable()
-  private let scroll = NSScrollView()
+  private let scroll = ExplorerScrollView()
   private let status = label(NL("正在读取…"), size: 12)
 
   var visibleEntryPaths: [String] { rows.map(\.path) }

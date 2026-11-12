@@ -1,5 +1,6 @@
 import AppKit
 import ExplorerCore
+import QuartzCore
 
 enum ExplorerFocus { static var keyboardVisible = false }
 
@@ -38,8 +39,360 @@ class SurfaceView: NSView {
   override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); needsDisplay = true }
 }
 
+enum FilePaneHit {
+  case background
+  case file(Int)
+  case group(Int)
+  case checkbox
+}
+
+protocol FilePaneDocument: AnyObject where Self: NSView {
+  func selectableItem(at point: NSPoint) -> FilePaneHit
+  func isClickInItemWhitespace(at point: NSPoint, row: Int) -> Bool
+  func fileRows(intersecting rect: NSRect) -> IndexSet
+}
+
+final class FilePaneScrollView: NSScrollView {
+  var onScroll: (() -> Void)?
+
+  override var hasHorizontalScroller: Bool {
+    get { false }
+    set {}
+  }
+
+  override var hasVerticalScroller: Bool {
+    get { false }
+    set {}
+  }
+
+  override func reflectScrolledClipView(_ clip: NSClipView) {
+    super.reflectScrolledClipView(clip)
+    if clip === contentView { onScroll?() }
+  }
+}
+
+final class ExplorerScroller: NSScroller {
+  static let thickness: CGFloat = 10
+  private static let thumbThickness: CGFloat = 6
+  private static let fadeAnimationKey = "thumbFade"
+  private let horizontal: Bool
+  private let thumbLayer = CALayer()
+  private var hovered = false
+  private var tracking = false
+  private var lastScrollOffset: CGFloat?
+  private var pendingFade: DispatchWorkItem?
+  weak var scrollView: NSScrollView?
+
+  init(horizontal: Bool) {
+    self.horizontal = horizontal
+    let thickness = Self.thickness
+    super.init(frame: NSRect(x: 0, y: 0, width: horizontal ? 100 : thickness, height: horizontal ? thickness : 100))
+    wantsLayer = true
+    thumbLayer.opacity = 0
+    layer?.addSublayer(thumbLayer)
+    addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self))
+  }
+
+  required init?(coder: NSCoder) { fatalError() }
+
+  override class func scrollerWidth(for controlSize: NSControl.ControlSize, scrollerStyle: NSScroller.Style) -> CGFloat { thickness }
+  override var isOpaque: Bool { false }
+  override var wantsUpdateLayer: Bool { true }
+
+  var thumbRect: NSRect {
+    let knob = backingAlignedRect(rect(for: .knob), options: .alignAllEdgesNearest)
+    guard !knob.isEmpty else { return .zero }
+    let thumbThickness = Self.thumbThickness
+    if horizontal {
+      return NSRect(x: knob.minX, y: bounds.midY - thumbThickness / 2, width: knob.width, height: thumbThickness)
+    }
+    return NSRect(x: bounds.midX - thumbThickness / 2, y: knob.minY, width: thumbThickness, height: knob.height)
+  }
+
+  func reflectScrollOrigin(_ origin: NSPoint) {
+    let offset = horizontal ? origin.x : origin.y
+    defer { lastScrollOffset = offset }
+    if let lastScrollOffset, lastScrollOffset != offset { revealThumb() }
+  }
+
+  private func setThumbOpacity(_ opacity: Float, animated: Bool = false) {
+    let previous = (thumbLayer.presentation() ?? thumbLayer).opacity
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    thumbLayer.opacity = opacity
+    thumbLayer.removeAnimation(forKey: Self.fadeAnimationKey)
+    if animated && previous != opacity && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+      let fade = CABasicAnimation(keyPath: "opacity")
+      fade.fromValue = previous
+      fade.toValue = opacity
+      fade.duration = 0.2
+      thumbLayer.add(fade, forKey: Self.fadeAnimationKey)
+    }
+    CATransaction.commit()
+  }
+
+  fileprivate func revealThumb() {
+    guard window != nil, isEnabled, !isHiddenOrHasHiddenAncestor else { return }
+    if thumbLayer.opacity != 1 { setThumbOpacity(1) }
+    scheduleFade()
+  }
+
+  private func scheduleFade() {
+    pendingFade?.cancel()
+    pendingFade = nil
+    guard !hovered, !tracking, thumbLayer.opacity > 0 else { return }
+    let fade = DispatchWorkItem { [weak self] in
+      self?.pendingFade = nil
+      self?.setThumbOpacity(0, animated: true)
+    }
+    pendingFade = fade
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: fade)
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    hovered = true
+    revealThumb()
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    hovered = false
+    scheduleFade()
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    tracking = true
+    revealThumb()
+    super.mouseDown(with: event)
+    hovered = explorerPointerIsInside(self)
+    tracking = false
+    scheduleFade()
+  }
+
+  override func viewDidHide() {
+    super.viewDidHide()
+    hovered = false
+    setThumbOpacity(0)
+    scheduleFade()
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    needsDisplay = true
+  }
+
+  override func updateLayer() {
+    let thumb = thumbRect
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      thumbLayer.backgroundColor = ExplorerPalette.scrollbar.cgColor
+    }
+    thumbLayer.isHidden = !isEnabled || thumb.isEmpty
+    thumbLayer.bounds = NSRect(origin: .zero, size: thumb.size)
+    thumbLayer.position = NSPoint(x: thumb.midX, y: thumb.midY)
+    thumbLayer.cornerRadius = min(thumb.width, thumb.height) / 2
+    CATransaction.commit()
+  }
+
+  override func scrollWheel(with event: NSEvent) {
+    if let scrollView { scrollView.scrollWheel(with: event) }
+    else { super.scrollWheel(with: event) }
+  }
+}
+
+class ExplorerScrollView: NSScrollView {
+  override func reflectScrolledClipView(_ clip: NSClipView) {
+    super.reflectScrolledClipView(clip)
+    guard clip === contentView else { return }
+    let origin = clip.bounds.origin
+    (horizontalScroller as? ExplorerScroller)?.reflectScrollOrigin(origin)
+    (verticalScroller as? ExplorerScroller)?.reflectScrollOrigin(origin)
+  }
+
+  override var hasHorizontalScroller: Bool {
+    get { super.hasHorizontalScroller }
+    set {
+      if newValue && horizontalScroller == nil { horizontalScroller = ExplorerScroller(horizontal: true) }
+      super.hasHorizontalScroller = newValue
+    }
+  }
+
+  override var hasVerticalScroller: Bool {
+    get { super.hasVerticalScroller }
+    set {
+      if newValue && verticalScroller == nil { verticalScroller = ExplorerScroller(horizontal: false) }
+      super.hasVerticalScroller = newValue
+    }
+  }
+}
+
+final class FilePaneSurface: SurfaceView {
+  static let detailsInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 24)
+  let scroll = FilePaneScrollView()
+  let horizontalScroller = ExplorerScroller(horizontal: true)
+  let verticalScroller = ExplorerScroller(horizontal: false)
+  private var origins: [ObjectIdentifier: NSPoint] = [:]
+  private var pendingOrigin: NSPoint?
+  private var sizingViewport = false
+
+  override init(frame: NSRect) {
+    super.init(frame: frame)
+    scroll.automaticallyAdjustsContentInsets = false
+    scroll.backgroundColor = ExplorerPalette.surface
+    addSubview(scroll)
+    for scroller in [horizontalScroller, verticalScroller] {
+      scroller.isHidden = true
+      scroller.target = self
+      scroller.action = #selector(moveScroller(_:))
+      scroller.scrollView = scroll
+      addSubview(scroller)
+    }
+    scroll.onScroll = { [weak self] in self?.updateScrollers() }
+  }
+
+  required init?(coder: NSCoder) { fatalError() }
+
+  func rememberDocumentOrigin(beforeInstalling document: NSView) {
+    guard let previous = scroll.documentView, previous !== document, pendingOrigin == nil else { return }
+    origins[ObjectIdentifier(previous)] = scroll.contentView.bounds.origin
+  }
+
+  func install(_ document: NSView) {
+    guard scroll.documentView !== document else { return }
+    let table = document as? FileTableView
+    let insets = table == nil ? NSEdgeInsets() : Self.detailsInsets
+    scroll.contentInsets = insets
+    scroll.documentView = document
+    pendingOrigin = origins[ObjectIdentifier(document)] ??
+      NSPoint(x: -insets.left, y: -(table?.headerView?.frame.height ?? 0))
+  }
+
+  func layoutViewport(filesVisible: Bool, layoutDocument: () -> Void) {
+    let origin = pendingOrigin ?? scroll.contentView.bounds.origin
+    pendingOrigin = nil
+    var viewport = bounds
+    var horizontal = false, vertical = false
+    sizingViewport = true
+    while true {
+      if scroll.frame != viewport { scroll.frame = viewport }
+      layoutDocument()
+      guard filesVisible else { break }
+      let (minimum, maximum) = scrollLimits()
+      let needsHorizontal = !horizontal && maximum.x > minimum.x
+      let needsVertical = !vertical && maximum.y > minimum.y
+      guard needsHorizontal || needsVertical else { break }
+      if needsHorizontal {
+        horizontal = true
+        viewport.size.height = max(0, viewport.height - ExplorerScroller.thickness)
+      }
+      if needsVertical {
+        vertical = true
+        viewport.size.width = max(0, viewport.width - ExplorerScroller.thickness)
+      }
+    }
+    if horizontal {
+      horizontalScroller.frame = NSRect(x: viewport.minX, y: viewport.maxY, width: viewport.width, height: bounds.maxY - viewport.maxY)
+    }
+    if vertical {
+      verticalScroller.frame = NSRect(x: viewport.maxX, y: viewport.minY, width: bounds.maxX - viewport.maxX, height: viewport.height)
+    }
+    let revealHorizontal = horizontal && horizontalScroller.isHidden
+    horizontalScroller.isHidden = !horizontal
+    verticalScroller.isHidden = !vertical
+    scrollTo(origin)
+    sizingViewport = false
+    updateScrollers()
+    if revealHorizontal { horizontalScroller.revealThumb() }
+  }
+
+  func scrollTo(_ origin: NSPoint) {
+    let clip = scroll.contentView
+    let proposed = NSRect(origin: origin, size: clip.bounds.size)
+    scroll.scroll(clip, to: clip.constrainBoundsRect(proposed).origin)
+    scroll.reflectScrolledClipView(clip)
+  }
+
+  private func scrollLimits() -> (minimum: NSPoint, maximum: NSPoint) {
+    let clip = scroll.contentView
+    let insets = scroll.contentInsets
+    let extent = clip.documentRect.insetBy(dx: -clip.bounds.width - insets.left - insets.right,
+                                          dy: -clip.bounds.height - insets.top - insets.bottom)
+    let minimum = NSRect(origin: extent.origin, size: clip.bounds.size)
+    let maximum = NSRect(origin: NSPoint(x: extent.maxX, y: extent.maxY), size: clip.bounds.size)
+    return (clip.constrainBoundsRect(minimum).origin, clip.constrainBoundsRect(maximum).origin)
+  }
+
+  private func updateScrollers() {
+    guard !sizingViewport, !horizontalScroller.isHidden || !verticalScroller.isHidden else { return }
+    let (minimum, maximum) = scrollLimits()
+    let origin = scroll.contentView.bounds.origin, visible = fileViewport.size
+    func update(_ scroller: ExplorerScroller, offset: CGFloat, range: CGFloat, page: CGFloat) {
+      guard !scroller.isHidden else { return }
+      scroller.isEnabled = range > 0
+      scroller.knobProportion = range > 0 ? page / (page + range) : 1
+      scroller.doubleValue = range > 0 ? Double(max(0, min(1, offset / range))) : 0
+      scroller.reflectScrollOrigin(origin)
+    }
+    update(horizontalScroller, offset: origin.x - minimum.x, range: maximum.x - minimum.x, page: visible.width)
+    update(verticalScroller, offset: origin.y - minimum.y, range: maximum.y - minimum.y, page: visible.height)
+  }
+
+  @objc private func moveScroller(_ scroller: NSScroller) {
+    let horizontal = scroller === horizontalScroller
+    let (minimum, maximum) = scrollLimits()
+    let start = horizontal ? minimum.x : minimum.y
+    let end = horizontal ? maximum.x : maximum.y
+    var origin = scroll.contentView.bounds.origin
+    let axis = horizontal ? \NSPoint.x : \NSPoint.y
+    let line = horizontal ? scroll.horizontalLineScroll : scroll.verticalLineScroll
+    let page = horizontal ? fileViewport.width - scroll.horizontalPageScroll : fileViewport.height - scroll.verticalPageScroll
+    switch scroller.hitPart {
+    case .decrementLine: origin[keyPath: axis] -= line
+    case .incrementLine: origin[keyPath: axis] += line
+    case .decrementPage: origin[keyPath: axis] -= max(line, page)
+    case .incrementPage: origin[keyPath: axis] += max(line, page)
+    default: origin[keyPath: axis] = start + (end - start) * scroller.doubleValue
+    }
+    scrollTo(origin)
+  }
+
+  var fileViewport: NSRect {
+    let clip = scroll.contentView
+    var area = convert(clip.bounds, from: clip)
+    if let header = (scroll.documentView as? FileTableView)?.headerView, let headerClip = header.superview {
+      let top = min(area.maxY, max(area.minY, convert(headerClip.bounds, from: headerClip).maxY))
+      area.size.height = area.maxY - top
+      area.origin.y = top
+    }
+    return area.intersection(bounds)
+  }
+
+  func pointerTarget(at event: NSEvent) -> (document: any FilePaneDocument, hit: FilePaneHit)? {
+    let point = convert(event.locationInWindow, from: nil)
+    guard let window, event.window === window, window.isKeyWindow, !scroll.isHidden, fileViewport.contains(point),
+          NativeSelection.canHandle(self), let document = scroll.documentView as? any FilePaneDocument,
+          let root = window.contentView, let parent = root.superview,
+          let hit = root.hitTest(parent.convert(event.locationInWindow, from: nil)),
+          hit === scroll || hit.isDescendant(of: scroll) else { return nil }
+    var target: NSView? = hit
+    while let candidate = target, candidate !== scroll {
+      if candidate is ExplorerCheckbox { return (document, .checkbox) }
+      if candidate is NSScroller || candidate is NSTableHeaderView || candidate is NSButton { return nil }
+      target = candidate.superview
+    }
+    return (document, document.selectableItem(at: document.convert(event.locationInWindow, from: nil)))
+  }
+}
+
 final class ExplorerTabBar: SurfaceView {
-  override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+  override func mouseDown(with event: NSEvent) {
+    guard let window else { return }
+    if event.clickCount == 2 {
+      window.performZoom(nil)
+    } else {
+      window.performDrag(with: event)
+    }
+  }
 }
 final class ExplorerLoadingView: SurfaceView {
   override func draw(_ dirtyRect: NSRect) {
@@ -174,22 +527,27 @@ final class ExplorerCheckbox: NSButton {
 }
 
 final class NameCell: NSTableCellView {
+  private static let iconSize: CGFloat = 22
   let icon = FileIconView(); let nameLabel = label(""); let checkbox = ExplorerCheckbox()
   var checkboxes = false { didSet { needsLayout = true } }
   override var isFlipped: Bool { true }
+  static func textLeading(checkboxes: Bool) -> CGFloat {
+    HorizontalFileGeometry.nameLeading(iconLeading: HorizontalFileGeometry.leading(checkboxes: checkboxes), iconSize: iconSize)
+  }
   override init(frame: NSRect) {
     super.init(frame: frame); [icon, nameLabel, checkbox].forEach(addSubview)
-    icon.imageScaling = .scaleProportionallyUpOrDown; textField = nameLabel
+    icon.imageScaling = .scaleProportionallyUpOrDown; nameLabel.alignment = .left; textField = nameLabel
   }
   required init?(coder: NSCoder) { fatalError() }
   override func layout() {
     super.layout(); checkbox.available = checkboxes
     checkbox.hovered = (superview as? FileRowView)?.hovered ?? false
     checkbox.frame = NSRect(x: 7, y: (bounds.height - 14) / 2, width: 14, height: 14)
-    let left: CGFloat = checkboxes ? 30 : 12
-    icon.frame = NSRect(x: left, y: (bounds.height - 22) / 2, width: 22, height: 22)
+    let left = HorizontalFileGeometry.leading(checkboxes: checkboxes), iconSize = Self.iconSize
+    icon.frame = NSRect(x: left, y: (bounds.height - iconSize) / 2, width: iconSize, height: iconSize)
     let height: CGFloat = max(nameLabel.isEditable ? 24 : 17, ceil(nameLabel.font?.ascender ?? 13) - floor(nameLabel.font?.descender ?? -3) + 2)
-    nameLabel.frame = NSRect(x: left + 31 - (nameLabel.isEditable ? 2 : 0), y: (bounds.height - height) / 2, width: max(0, min(nameLabel.isEditable ? 240 : bounds.width, bounds.width - left - 43)), height: height)
+    let textLeading = Self.textLeading(checkboxes: checkboxes)
+    nameLabel.frame = NSRect(x: textLeading - (nameLabel.isEditable ? 2 : 0), y: (bounds.height - height) / 2, width: max(0, min(nameLabel.isEditable ? 240 : bounds.width, bounds.width - textLeading - MetadataCell.textInset)), height: height)
   }
   func configure(_ entry: FileEntry, name: String? = nil) {
     nameLabel.font = ExplorerTypography.font()
@@ -201,11 +559,12 @@ final class NameCell: NSTableCellView {
 }
 final class TopStackView: NSStackView { override var isFlipped: Bool { true } }
 final class MetadataCell: NSTableCellView {
+  static let textInset: CGFloat = 12
   let value = label("", color: ExplorerPalette.secondary)
   override var isFlipped: Bool { true }
   override init(frame: NSRect) { super.init(frame: frame); addSubview(value); textField = value }
   required init?(coder: NSCoder) { fatalError() }
-  override func layout() { super.layout(); let height = max(17, ceil(value.font?.ascender ?? 13) - floor(value.font?.descender ?? -3) + 2); value.frame = NSRect(x: 12, y: (bounds.height - height) / 2, width: max(0, bounds.width - 24), height: height) }
+  override func layout() { super.layout(); let height = max(17, ceil(value.font?.ascender ?? 13) - floor(value.font?.descender ?? -3) + 2); value.frame = NSRect(x: Self.textInset, y: (bounds.height - height) / 2, width: max(0, bounds.width - 2 * Self.textInset), height: height) }
 }
 final class ExplorerTableHeaderView: NSTableHeaderView {
   var onMenu: ((NSEvent) -> Void)?
@@ -214,24 +573,34 @@ final class ExplorerTableHeaderView: NSTableHeaderView {
 
 final class ExplorerHeaderCell: NSTableHeaderCell {
   var ascending: Bool?
-  override func draw(withFrame fullFrame: NSRect, in controlView: NSView) {
-    ExplorerPalette.surface.setFill(); fullFrame.fill()
-    let cellFrame = NSRect(x: fullFrame.minX, y: fullFrame.minY, width: fullFrame.width, height: fullFrame.height - 4)
-    let text = stringValue as NSString
-    let attrs: [NSAttributedString.Key: Any] = [.font: ExplorerTypography.font(), .foregroundColor: ExplorerPalette.secondary]
-    let isSize = stringValue == NL("大小")
-    let x = isSize ? cellFrame.maxX - text.size(withAttributes: attrs).width - 12 : cellFrame.minX + 12
-    text.draw(at: NSPoint(x: x, y: cellFrame.midY - text.size(withAttributes: attrs).height / 2), withAttributes: attrs)
+  var textLeading = MetadataCell.textInset
+  override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
+    ExplorerPalette.surface.setFill(); cellFrame.fill()
+    let bottomBorderY = cellFrame.maxY - 1
+    let contentMidY = (cellFrame.minY + bottomBorderY) / 2
+    let titleCell = NSTextFieldCell(textCell: stringValue)
+    titleCell.lineBreakMode = .byTruncatingTail; titleCell.font = ExplorerTypography.font()
+    titleCell.textColor = ExplorerPalette.secondary; titleCell.alignment = alignment
+    let titleSize = titleCell.cellSize
+    let arrowSpace: CGFloat = ascending == nil ? 0 : 16
+    let left = cellFrame.minX + textLeading, right = cellFrame.maxX - MetadataCell.textInset
+    let titleFrame = NSRect(x: left + (alignment == .right ? arrowSpace : 0), y: contentMidY - titleSize.height / 2,
+                            width: max(0, right - left - arrowSpace), height: titleSize.height)
+    titleCell.draw(withFrame: titleFrame, in: controlView)
     ExplorerPalette.border.setFill()
-    NSRect(x: cellFrame.maxX - 1, y: cellFrame.minY + 7, width: 1, height: 25).fill()
-    NSRect(x: cellFrame.minX, y: cellFrame.maxY - 1, width: cellFrame.width, height: 1).fill()
+    let dividerY = cellFrame.minY + 7
+    NSRect(x: cellFrame.maxX - 1, y: dividerY, width: 1, height: max(0, bottomBorderY - dividerY - 4)).fill()
+    NSRect(x: cellFrame.minX, y: bottomBorderY, width: cellFrame.width, height: 1).fill()
     if let ascending {
-      ExplorerIcons.image(ascending ? "chevronUp" : "chevronDown", size: 12, color: ExplorerPalette.secondary).draw(in: NSRect(x: x + text.size(withAttributes: attrs).width + 8, y: cellFrame.midY - 6, width: 12, height: 12), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+      let titleWidth = min(titleFrame.width, titleSize.width)
+      let x = alignment == .right ? titleFrame.maxX - titleWidth - arrowSpace : titleFrame.minX + titleWidth + 4
+      ExplorerIcons.image(ascending ? "chevronUp" : "chevronDown", size: 12, color: ExplorerPalette.secondary).draw(in: NSRect(x: x, y: contentMidY - 6, width: 12, height: 12), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
   }
   override func drawSortIndicator(withFrame cellFrame: NSRect, in controlView: NSView, ascending: Bool, priority: Int) {}
 }
 final class FileRowView: NSTableRowView {
+  var selectionFocused = false { didSet { needsDisplay = true } }
   override var isSelected: Bool { didSet { for column in 0..<numberOfColumns { (view(atColumn: column) as? NameCell)?.checkbox.state = isSelected ? .on : .off } } }
   var hovered = false { didSet { for column in 0..<numberOfColumns { (view(atColumn: column) as? NameCell)?.checkbox.hovered = hovered }; needsDisplay = true } }
   override func updateTrackingAreas() {
@@ -245,58 +614,98 @@ final class FileRowView: NSTableRowView {
   override func drawBackground(in dirtyRect: NSRect) {
     (hovered && !isSelected ? ExplorerPalette.rowHover : ExplorerPalette.surface).setFill()
     NSBezierPath(roundedRect: bounds, xRadius: 3, yRadius: 3).fill()
+    if !isSelected { drawFileFocus() }
   }
   override func drawSelection(in dirtyRect: NSRect) {
-    ExplorerPalette.selection.setFill(); NSBezierPath(roundedRect: bounds, xRadius: 3, yRadius: 3).fill()
-    if isEmphasized && ExplorerFocus.keyboardVisible { ExplorerPalette.accent.withAlphaComponent(0.25).setStroke(); NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5)).stroke() }
+    let radius: CGFloat = 3
+    var shape = bounds
+    if let table = enclosingScrollView?.documentView as? FileTableView {
+      let row = table.row(for: self)
+      let selection = table.selectedRowIndexes
+      if row >= 0 {
+        let joinsAbove = row > 0 && selection.contains(row - 1)
+        let joinsBelow = selection.contains(row + 1)
+        if isFlipped ? joinsAbove : joinsBelow { shape.origin.y -= radius; shape.size.height += radius }
+        if isFlipped ? joinsBelow : joinsAbove { shape.size.height += radius }
+      }
+    }
+    NSGraphicsContext.saveGraphicsState()
+    NSBezierPath.clip(bounds)
+    ExplorerPalette.selection.setFill()
+    NSBezierPath(roundedRect: shape, xRadius: radius, yRadius: radius).fill()
+    NSGraphicsContext.restoreGraphicsState()
+    drawFileFocus()
+  }
+  private func drawFileFocus() {
+    guard selectionFocused, ExplorerFocus.keyboardVisible, window?.isKeyWindow == true, window?.firstResponder is FileTableView else { return }
+    drawFileSelectionFocus(bounds)
   }
   override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
 }
-final class FileTableView: NSTableView {
+private func drawFileSelectionFocus(_ bounds: NSRect) {
+  ExplorerPalette.accent.withAlphaComponent(0.65).setStroke()
+  NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3).stroke()
+}
+
+final class FileTableView: NSTableView, FilePaneDocument {
   var isFileRow: (Int) -> Bool = { _ in true }
-  var onGroupClick: ((Int) -> Void)?
+  var groupHeaderRows = IndexSet()
   override func selectRowIndexes(_ indexes: IndexSet, byExtendingSelection extend: Bool) {
-    super.selectRowIndexes(IndexSet(indexes.filter(isFileRow)), byExtendingSelection: extend)
+    super.selectRowIndexes(indexes.subtracting(groupHeaderRows), byExtendingSelection: extend)
   }
-  var openSelection: (() -> Void)?; var previewSelection: (() -> Void)?; var showContext: ((NSEvent) -> Void)?; var renameSelection: (() -> Void)?; var trashSelection: (() -> Void)?
-  private var marquee: NativeMarqueeSelection?
-  private var selectionCursor: Int?
-  private var selectionAnchor: Int?
-  func cancelMarqueeSelection() { marquee?.end(cancelled: false); marquee = nil }
-  override func reloadData() { cancelMarqueeSelection(); selectionCursor = nil; selectionAnchor = nil; super.reloadData() }
-  override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); if window == nil { cancelMarqueeSelection() } }
-  override func mouseDown(with event: NSEvent) {
-    guard NativeSelection.canHandle(self) else { super.mouseDown(with: event); return }
-    let point = convert(event.locationInWindow, from: nil), clicked = row(at: point)
-    if clicked >= 0 && !isFileRow(clicked) { onGroupClick?(clicked); return }
-    if clicked < 0, visibleRect.contains(point) {
-      window?.makeFirstResponder(self)
-      let previousAnchor = selectionAnchor
-      if event.modifierFlags.intersection([.command, .control, .shift]).isEmpty { selectionAnchor = nil }
-      let frames = (0..<numberOfRows).filter(isFileRow).map { ($0, rect(ofRow: $0)) }
-      marquee = NativeMarqueeSelection(host: self, event: event, original: Set(selectedRowIndexes), targets: frames, apply: { [weak self] selection in guard let self, self.selectedRowIndexes != IndexSet(selection) else { return }; self.selectRowIndexes(IndexSet(selection), byExtendingSelection: false) }, finished: { [weak self] in if self?.marquee?.wasCancelled == true { self?.selectionAnchor = previousAnchor }; self?.marquee = nil })
-      marquee?.begin(); return
+  var previewSelection: (() -> Void)?; var renameSelection: (() -> Void)?; var trashSelection: (() -> Void)?
+  var showFileContextMenu: ((NSEvent) -> Void)?
+  weak var selectionManager: SelectionManager?
+  private func hitsFileContent(at point: NSPoint, row: Int) -> Bool {
+    let column = column(at: point)
+    guard column >= 0 else { return false }
+    guard let cell = view(atColumn: column, row: row, makeIfNecessary: false) else { return true }
+    let location = cell.convert(point, from: self)
+    if let name = cell as? NameCell {
+      let start = name.checkboxes ? name.checkbox.frame.minX : name.icon.frame.minX
+      let prefix = NSRect(x: start, y: 0, width: name.nameLabel.frame.minX - start, height: name.bounds.height)
+      return prefix.contains(location) || HorizontalFileGeometry.textHit(name.nameLabel, at: location)
     }
-    let original = Set(selectedRowIndexes), anchor = selectionAnchor
-    if clicked >= 0 { selectionCursor = clicked; if !event.modifierFlags.contains(.shift) { selectionAnchor = clicked } }
-    super.mouseDown(with: NativeSelection.commandClick(event))
-    if clicked >= 0, !event.modifierFlags.intersection([.command, .control, .shift]).isEmpty {
-      selectRowIndexes(IndexSet(NativeSelection.click(clicked, anchor: anchor, original: original, flags: event.modifierFlags)), byExtendingSelection: false)
-    }
+    if let metadata = cell as? MetadataCell { return HorizontalFileGeometry.textHit(metadata.value, at: location) }
+    return true
   }
+  func selectableItem(at point: NSPoint) -> FilePaneHit {
+    guard bounds.contains(point) else { return .background }
+    let row = row(at: point)
+    guard row >= 0 else { return .background }
+    guard isFileRow(row) else { return .group(row) }
+    return .file(row)
+  }
+
+  func isClickInItemWhitespace(at point: NSPoint, row: Int) -> Bool {
+    !hitsFileContent(at: point, row: row)
+  }
+
+  func fileRows(intersecting rect: NSRect) -> IndexSet {
+    let rows = rows(in: rect)
+    guard rows.location != NSNotFound, rows.length > 0 else { return [] }
+    let candidates = IndexSet(integersIn: rows.location..<min(numberOfRows, NSMaxRange(rows)))
+    return IndexSet(candidates.filter { isFileRow($0) && self.rect(ofRow: $0).intersects(rect) })
+  }
+
   override func menu(for event: NSEvent) -> NSMenu? {
-    let clicked = row(at: convert(event.locationInWindow, from: nil))
-    if clicked >= 0 && !selectedRowIndexes.contains(clicked) { selectRowIndexes(IndexSet(integer: clicked), byExtendingSelection: false) }
-    if clicked < 0 { deselectAll(nil) }
-    showContext?(event); return nil
+    showFileContextMenu?(event)
+    return nil
   }
   override func keyDown(with event: NSEvent) {
-    guard NativeSelection.canHandle(self) else { super.keyDown(with: event); return }
-    if event.keyCode == 53 { if marquee != nil { marquee?.end(cancelled: true) } else { deselectAll(nil); selectionCursor = nil; selectionAnchor = nil }; return }
-    if [115, 119, 125, 126].contains(event.keyCode), event.modifierFlags.intersection([.command, .control, .option]).isEmpty, numberOfRows > 0 {
-      let previous = selectionCursor ?? selectedRowIndexes.last ?? -1
+    guard NativeSelection.canHandle(self), let selectionManager else { super.keyDown(with: event); return }
+    if event.keyCode == 53 {
+      selectionManager.SelectionChange(.clear)
+      return
+    }
+    let flags = FileSelectionModifiers(event.modifierFlags)
+    if event.keyCode == 49, selectionManager._HandleSpaceKey(flags, fallbackRow: selectedRowIndexes.last) { return }
+    if [115, 119, 125, 126].contains(event.keyCode), event.modifierFlags.intersection([.command, .option]).isEmpty, numberOfRows > 0 {
+      let previous = selectionManager.focusedRow(fallback: selectedRowIndexes.last) ?? -1
       guard let next = nextFileRow(key: event.keyCode, previous: previous, count: numberOfRows, accepts: isFileRow) else { return }
-      selectRowIndexes(IndexSet(integer: next), byExtendingSelection: event.modifierFlags.contains(.shift)); selectionCursor = next; selectionAnchor = next; scrollRowToVisible(next); return
+      selectionManager.UserMovedFocusWithKeyboard(to: next, modifiers: flags)
+      scrollRowToVisible(next)
+      return
     }
     if event.keyCode == 36 || event.keyCode == 76 { renameSelection?(); return }
     if event.keyCode == 49 { previewSelection?(); return }
@@ -305,7 +714,12 @@ final class FileTableView: NSTableView {
     super.keyDown(with: event)
   }
 }
-final class FileCollectionView: NSCollectionView {
+final class FileCollectionView: NSCollectionView, FilePaneDocument {
+  override func reloadData() {
+    for view in subviews where view is NativeExpandedNameView { view.removeFromSuperview() }
+    super.reloadData()
+  }
+
   override func setFrameSize(_ newSize: NSSize) {
     var size = newSize
     if let layout = collectionViewLayout as? ExplorerCollectionLayout, layout.mode == .list {
@@ -316,40 +730,38 @@ final class FileCollectionView: NSCollectionView {
     super.setFrameSize(size)
   }
   var isFileRow: (Int) -> Bool = { _ in true }
-  var onGroupClick: ((Int) -> Void)?
-  var openSelection: (() -> Void)?; var previewSelection: (() -> Void)?; var showContext: ((NSEvent) -> Void)?; var renameSelection: (() -> Void)?; var trashSelection: (() -> Void)?
-  private var marquee: NativeMarqueeSelection?
-  private var selectionCursor: Int?
-  private var selectionAnchor: Int?
-  private(set) var isMarqueeSelecting = false
-  func cancelMarqueeSelection() { marquee?.end(cancelled: false); marquee = nil }
-  override func reloadData() { cancelMarqueeSelection(); selectionCursor = nil; selectionAnchor = nil; super.reloadData() }
-  override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); if window == nil { cancelMarqueeSelection() } }
-  private func applySelection(_ indexes: Set<Int>) {
-    let previous = selectionIndexPaths, next = Set(indexes.filter(isFileRow).map { IndexPath(item: $0, section: 0) })
-    guard previous != next else { return }; selectionIndexPaths = next
-    delegate?.collectionView?(self, didDeselectItemsAt: previous.subtracting(next)); delegate?.collectionView?(self, didSelectItemsAt: next.subtracting(previous))
-  }
-  private func refreshExpandedNames() { for item in visibleItems() { item.view.needsLayout = true } }
+  var listFileName: (Int) -> String? = { _ in nil }
+  var listCheckboxesEnabled: () -> Bool = { false }
+  var previewSelection: (() -> Void)?; var renameSelection: (() -> Void)?; var trashSelection: (() -> Void)?
+  var showFileContextMenu: ((NSEvent) -> Void)?
+  weak var selectionManager: SelectionManager?
+  func refreshExpandedNames() { for item in visibleItems() { item.view.needsLayout = true } }
   override func menu(for event: NSEvent) -> NSMenu? {
-    let hit = indexPathForItem(at: convert(event.locationInWindow, from: nil))
-    if hit == nil || hit.map({ !isFileRow($0.item) }) == true {
-      let previous = selectionIndexPaths; selectionIndexPaths = []; delegate?.collectionView?(self, didDeselectItemsAt: previous)
-    }
-    if let clicked = hit, isFileRow(clicked.item), !selectionIndexPaths.contains(clicked) {
-      let previous = selectionIndexPaths; selectionIndexPaths = [clicked]
-      delegate?.collectionView?(self, didDeselectItemsAt: previous); delegate?.collectionView?(self, didSelectItemsAt: [clicked])
-    }
-    showContext?(event); return nil
+    showFileContextMenu?(event)
+    return nil
   }
+
   override func keyDown(with event: NSEvent) {
-    guard NativeSelection.canHandle(self) else { super.keyDown(with: event); return }
-    if event.keyCode == 53 { if marquee != nil { marquee?.end(cancelled: true) } else { applySelection([]); selectionCursor = nil; selectionAnchor = nil }; return }
-    if [115, 119, 125, 126].contains(event.keyCode), event.modifierFlags.intersection([.command, .control, .option]).isEmpty, numberOfSections > 0, numberOfItems(inSection: 0) > 0 {
-      let count = numberOfItems(inSection: 0), previous = selectionCursor ?? selectionIndexPaths.map(\.item).max() ?? -1
-      guard let next = nextFileRow(key: event.keyCode, previous: previous, count: count, accepts: isFileRow) else { return }
-      let paths = event.modifierFlags.contains(.shift) ? Set(selectionIndexPaths.map(\.item)).union([next]) : [next]
-      applySelection(paths); selectionCursor = next; selectionAnchor = next; scrollToItems(at: [IndexPath(item: next, section: 0)], scrollPosition: .nearestHorizontalEdge.union(.nearestVerticalEdge)); return
+    guard NativeSelection.canHandle(self), let selectionManager else { super.keyDown(with: event); return }
+    if event.keyCode == 53 {
+      selectionManager.SelectionChange(.clear)
+      return
+    }
+    let flags = FileSelectionModifiers(event.modifierFlags)
+    if event.keyCode == 49, selectionManager._HandleSpaceKey(flags, fallbackRow: selectionIndexPaths.lazy.map(\.item).max()) { return }
+    if [115, 119, 123, 124, 125, 126].contains(event.keyCode),
+       event.modifierFlags.intersection([.command, .option]).isEmpty, numberOfSections > 0 {
+      let count = numberOfItems(inSection: 0), previous = selectionManager.focusedRow(fallback: selectionIndexPaths.lazy.map(\.item).max()) ?? -1
+      let next: Int?
+      if [115, 119].contains(event.keyCode) || previous < 0 {
+        next = nextFileRow(key: event.keyCode, previous: previous, count: count, accepts: isFileRow)
+      } else {
+        next = (collectionViewLayout as? ExplorerCollectionLayout)?.neighbor(of: previous, key: event.keyCode, accepts: isFileRow)
+      }
+      guard let next else { return }
+      selectionManager.UserMovedFocusWithKeyboard(to: next, modifiers: flags)
+      scrollToItems(at: [IndexPath(item: next, section: 0)], scrollPosition: .nearestHorizontalEdge.union(.nearestVerticalEdge))
+      return
     }
     if event.keyCode == 36 || event.keyCode == 76 { renameSelection?(); return }
     if event.keyCode == 49 { previewSelection?(); return }
@@ -357,26 +769,67 @@ final class FileCollectionView: NSCollectionView {
     if event.keyCode == 51 && event.modifierFlags.contains(.command) { trashSelection?(); return }
     super.keyDown(with: event)
   }
-  override func mouseDown(with event: NSEvent) {
-    guard NativeSelection.canHandle(self) else { super.mouseDown(with: event); return }
-    let point = convert(event.locationInWindow, from: nil), clicked = indexPathForItem(at: point)
-    if let clicked, !isFileRow(clicked.item) { onGroupClick?(clicked.item); return }
-    if clicked == nil, visibleRect.contains(point) {
-      window?.makeFirstResponder(self); isMarqueeSelecting = true; refreshExpandedNames()
-      let previousAnchor = selectionAnchor
-      if event.modifierFlags.intersection([.command, .control, .shift]).isEmpty { selectionAnchor = nil }
-      let count = numberOfSections > 0 ? numberOfItems(inSection: 0) : 0
-      let frames = (0..<count).compactMap { index -> (Int, NSRect)? in guard isFileRow(index), let rect = collectionViewLayout?.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame else { return nil }; return (index, rect) }
-      marquee = NativeMarqueeSelection(host: self, event: event, original: Set(selectionIndexPaths.map(\.item)), targets: frames, apply: { [weak self] in self?.applySelection($0) }, finished: { [weak self] in if self?.marquee?.wasCancelled == true { self?.selectionAnchor = previousAnchor }; self?.marquee = nil; self?.isMarqueeSelecting = false; self?.refreshExpandedNames() })
-      marquee?.begin(); return
-    }
-    let original = Set(selectionIndexPaths.map(\.item)), anchor = selectionAnchor
-    if let clicked { selectionCursor = clicked.item; if !event.modifierFlags.contains(.shift) { selectionAnchor = clicked.item } }
-    super.mouseDown(with: NativeSelection.commandClick(event))
-    if let clicked, !event.modifierFlags.intersection([.command, .control, .shift]).isEmpty {
-      applySelection(NativeSelection.click(clicked.item, anchor: anchor, original: original, flags: event.modifierFlags))
-    }
-    if event.clickCount == 2, clicked != nil { openSelection?() }
+  func selectableItem(at point: NSPoint) -> FilePaneHit {
+    guard let indexPath = indexPathForItem(at: point),
+          let frame = layoutAttributesForItem(at: indexPath)?.frame, frame.contains(point) else { return .background }
+    return isFileRow(indexPath.item) ? .file(indexPath.item) : .group(indexPath.item)
+  }
+
+  func isClickInItemWhitespace(at point: NSPoint, row: Int) -> Bool {
+    guard (collectionViewLayout as? ExplorerCollectionLayout)?.mode == .list,
+          let frame = layoutAttributesForItem(at: IndexPath(item: row, section: 0))?.frame else { return false }
+    return !HorizontalFileGeometry.listHit(in: frame, checkboxes: listCheckboxesEnabled(), name: listFileName(row),
+                                           where: { $0.contains(point) })
+  }
+
+  func fileRows(intersecting rect: NSRect) -> IndexSet {
+    guard let layout = collectionViewLayout else { return [] }
+    return IndexSet(layout.layoutAttributesForElements(in: rect).compactMap { attributes in
+      guard let row = attributes.indexPath?.item, isFileRow(row) else { return nil }
+      return row
+    })
+  }
+}
+
+private enum HorizontalFileGeometry {
+  static let listIconSize: CGFloat = 16
+  static let listIconLeading: CGFloat = 32
+  static let listNameLeading = listIconLeading + listIconSize + 2
+  static let listTrailing: CGFloat = 6
+  static func leading(checkboxes: Bool) -> CGFloat { checkboxes ? 30 : 12 }
+  static func nameLeading(iconLeading: CGFloat, iconSize: CGFloat) -> CGFloat { iconLeading + iconSize + 9 }
+  static func nameWidth(in width: CGFloat, leading: CGFloat) -> CGFloat { max(20, width - leading - 12) }
+
+  private static func textWidth(_ text: String, font: NSFont) -> CGFloat {
+    ceil((text as NSString).size(withAttributes: [.font: font]).width) + 4
+  }
+
+  static func listWidth(for names: [String]) -> CGFloat {
+    let font = ExplorerTypography.font()
+    let labelWidth = names.lazy.map { textWidth($0, font: font) }.max() ?? 0
+    return listNameLeading + max(20, labelWidth) + listTrailing
+  }
+
+  static func textHit(_ label: NSTextField, at point: NSPoint) -> Bool {
+    guard label.frame.contains(point), !label.stringValue.isEmpty, let font = label.font else { return false }
+    var rect = label.frame
+    rect.size.width = min(rect.width, textWidth(label.stringValue, font: font))
+    if label.alignment == .right { rect.origin.x = label.frame.maxX - rect.width }
+    return rect.contains(point)
+  }
+
+  static func listHit(in frame: NSRect, checkboxes: Bool, name: @autoclosure () -> String?,
+                      where test: (NSRect) -> Bool) -> Bool {
+    if checkboxes, test(NSRect(x: frame.minX + 7, y: frame.midY - 7, width: 14, height: 14)) { return true }
+    let iconArea = NSRect(x: frame.minX + listIconLeading, y: frame.minY,
+                          width: listNameLeading - listIconLeading, height: frame.height)
+    if test(iconArea.intersection(frame)) { return true }
+    let nameArea = NSRect(x: frame.minX + listNameLeading, y: frame.minY,
+                          width: max(0, frame.width - listNameLeading - listTrailing), height: frame.height)
+    guard test(nameArea), let name = name() else { return false }
+    var textArea = nameArea
+    textArea.size.width = min(textArea.width, textWidth(name, font: ExplorerTypography.font()))
+    return test(textArea)
   }
 }
 
@@ -400,9 +853,14 @@ final class ExplorerCollectionLayout: NSCollectionViewLayout {
     let viewport = collectionView.enclosingScrollView?.contentSize ?? collectionView.bounds.size
     switch mode {
     case .list:
-      inset = NSSize(width: 10, height: 6); gap = .zero; cell = NSSize(width: 220, height: max(compact ? 28 : 32, ExplorerTypography.rowHeight))
-      rows = max(1, Int((viewport.height - 12) / cell.height)); columns = max(1, Int(ceil(Double(count) / Double(rows))))
-      contentSize = NSSize(width: max(viewport.width, CGFloat(columns) * cell.width + 20), height: viewport.height)
+      inset = NSSize(width: 14, height: 6); gap = NSSize(width: 10, height: 1)
+      cell.height = max(compact ? 28 : 32, ExplorerTypography.rowHeight)
+      rows = max(1, Int((viewport.height - 2 * inset.height + gap.height) / (cell.height + gap.height)))
+      let files = collectionView as? FileCollectionView
+      cell.width = HorizontalFileGeometry.listWidth(for: (0..<min(count, rows)).compactMap { files?.listFileName($0) })
+      columns = max(1, (count + rows - 1) / rows)
+      let width = 2 * inset.width + CGFloat(columns) * (cell.width + gap.width) - gap.width
+      contentSize = NSSize(width: max(viewport.width, width), height: viewport.height)
     case .content:
       inset = NSSize(width: 10, height: 6); gap = .zero; columns = 1; cell = NSSize(width: max(100, viewport.width - 20), height: max(compact ? 66 : 78, ExplorerTypography.lineHeight * 2 + 16))
       contentSize = NSSize(width: viewport.width, height: max(viewport.height, CGFloat(count) * cell.height + 20))
@@ -419,7 +877,11 @@ final class ExplorerCollectionLayout: NSCollectionViewLayout {
     }
     groupedFrames.removeAll(keepingCapacity: true)
     if !groupHeaderRows.isEmpty {
-      if mode == .list { columns = max(1, Int((viewport.width - 20) / 220)); cell.width = max(40, (viewport.width - 20) / CGFloat(columns)) }
+      if mode == .list {
+        let width = max(1, viewport.width - 2 * inset.width)
+        cell.width = min(cell.width, width)
+        columns = max(1, Int((width + gap.width) / (cell.width + gap.width)))
+      }
       var y = inset.height, column = 0
       groupedFrames.reserveCapacity(count)
       for index in 0..<count {
@@ -452,7 +914,10 @@ final class ExplorerCollectionLayout: NSCollectionViewLayout {
   }
   override func layoutAttributesForDropTarget(at point: NSPoint) -> NSCollectionViewLayoutAttributes? {
     guard NSRect(origin: .zero, size: contentSize).contains(point) else { return nil }
-    if !groupHeaderRows.isEmpty { return layoutAttributesForElements(in: NSRect(x: point.x, y: point.y, width: 1, height: 1)).first { $0.frame.contains(point) } }
+    if !groupHeaderRows.isEmpty {
+      return layoutAttributesForElements(in: NSRect(x: point.x, y: point.y, width: 1, height: 1)).first { $0.frame.contains(point) }
+        ?? layoutAttributesForInterItemGap(before: IndexPath(item: count, section: 0))
+    }
     let column = max(0, Int((point.x - inset.width) / (cell.width + gap.width)))
     let row = max(0, Int((point.y - inset.height) / (cell.height + gap.height)))
     let item = mode == .list ? column * rows + row : row * columns + column
@@ -462,15 +927,36 @@ final class ExplorerCollectionLayout: NSCollectionViewLayout {
   override func layoutAttributesForInterItemGap(before indexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {
     guard indexPath.section == 0, (0...count).contains(indexPath.item) else { return nil }
     let value = NSCollectionViewLayoutAttributes(forInterItemGapBefore: indexPath)
-    let item = layoutAttributesForItem(at: indexPath) ?? layoutAttributesForItem(at: IndexPath(item: count - 1, section: 0))
-    let frame = item?.frame ?? NSRect(origin: NSPoint(x: inset.width, y: inset.height), size: cell)
-    if mode == .content {
-      value.frame = NSRect(x: frame.minX, y: indexPath.item < count || count == 0 ? frame.minY : frame.maxY, width: frame.width, height: 3)
-    } else {
-      value.frame = NSRect(x: indexPath.item < count || count == 0 ? frame.minX : frame.maxX, y: frame.minY, width: 3, height: frame.height)
-    }
+    value.isHidden = true
     return value
   }
+  func neighbor(of index: Int, key: UInt16, accepts: (Int) -> Bool) -> Int? {
+    guard (0..<count).contains(index) else { return nil }
+    let horizontal = key == 123 || key == 124
+    let direction = key == 124 || key == 125 ? 1 : -1
+    if groupHeaderRows.isEmpty {
+      let step = mode == .list ? (horizontal ? rows : 1) : (horizontal ? 1 : columns)
+      let next = index + direction * step
+      guard (0..<count).contains(next), accepts(next) else { return nil }
+      if mode == .list, !horizontal, index / rows != next / rows { return nil }
+      if mode != .list, horizontal, index / columns != next / columns { return nil }
+      return next
+    }
+    guard groupedFrames.indices.contains(index) else { return nil }
+    let frame = groupedFrames[index]
+    for candidate in stride(from: index + direction, to: direction > 0 ? groupedFrames.count : -1, by: direction) {
+      let next = groupedFrames[candidate]
+      if horizontal {
+        guard next.midY == frame.midY else { return nil }
+        if accepts(candidate) { return candidate }
+      } else if abs(next.midY - frame.midY) >= frame.height,
+                next.maxX > frame.minX, next.minX < frame.maxX, accepts(candidate) {
+        return candidate
+      }
+    }
+    return nil
+  }
+
   override func layoutAttributesForElements(in rect: NSRect) -> [NSCollectionViewLayoutAttributes] {
     guard count > 0 else { return [] }
     var output: [NSCollectionViewLayoutAttributes] = []
@@ -486,7 +972,9 @@ final class ExplorerCollectionLayout: NSCollectionViewLayout {
       return output
     }
     if mode == .list {
-      let first = max(0, Int((rect.minX - inset.width) / cell.width)); let last = min(columns - 1, Int(rect.maxX / cell.width) + 1)
+      let pitch = cell.width + gap.width
+      let first = max(0, Int((rect.minX - inset.width) / pitch))
+      let last = min(columns - 1, Int((rect.maxX - inset.width) / pitch))
       if first <= last { for index in (first * rows)..<min(count, (last + 1) * rows) { if let a = layoutAttributesForItem(at: IndexPath(item: index, section: 0)), a.frame.intersects(rect) { output.append(a) } } }
     } else {
       let first = max(0, Int((rect.minY - inset.height) / (cell.height + gap.height))); let last = max(first, Int(rect.maxY / (cell.height + gap.height)) + 1)
@@ -497,19 +985,33 @@ final class ExplorerCollectionLayout: NSCollectionViewLayout {
   }
 }
 final class ItemSurface: SurfaceView {
-  var selected = false { didSet { needsDisplay = true; needsLayout = true } }; var hovered = false { didSet { subviews.compactMap { $0 as? ExplorerCheckbox }.forEach { $0.hovered = hovered }; needsDisplay = true } }
+  var selected = false {
+    didSet {
+      if !selected { removeExpandedName() }
+      needsDisplay = true
+      needsLayout = true
+    }
+  }
+  var hovered = false { didSet { subviews.compactMap { $0 as? ExplorerCheckbox }.forEach { $0.hovered = hovered }; needsDisplay = true } }
   var bottomLine = false
-  private var expandedName: NativeExpandedNameView?
+  var selectionFocused = false { didSet { needsDisplay = true } }
+  private weak var expandedName: NativeExpandedNameView?
   private var scrollObserver: NSObjectProtocol?
-  override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); hovered = explorerPointerIsInside(self); if window == nil { expandedName?.removeFromSuperview(); expandedName = nil; if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver) }; scrollObserver = nil } }
+  override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); hovered = explorerPointerIsInside(self); if window == nil { removeExpandedName(); if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver) }; scrollObserver = nil } }
   deinit { if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver) } }
+
+  private func removeExpandedName() {
+    expandedName?.removeFromSuperview()
+    expandedName = nil
+  }
+
   override func layout() {
-    super.layout(); expandedName?.removeFromSuperview(); expandedName = nil
+    super.layout(); removeExpandedName()
     guard selected, window != nil, let name = subviews.compactMap({ $0 as? NSTextField }).first(where: { $0.identifier != nil }),
           !name.isEditable, name.alignment == .center, name.maximumNumberOfLines == 2, name.frame.minY > 40 else { return }
     var ancestor = superview
     while ancestor != nil, !(ancestor is FileCollectionView) { ancestor = ancestor?.superview }
-    guard let collection = ancestor as? FileCollectionView, !collection.isMarqueeSelecting else { return }
+    guard let collection = ancestor as? FileCollectionView, collection.selectionManager?.isMarqueeActive != true else { return }
     if scrollObserver == nil, let clip = collection.enclosingScrollView?.contentView {
       clip.postsBoundsChangedNotifications = true
       scrollObserver = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak self] _ in self?.needsLayout = true; self?.layoutSubtreeIfNeeded() }
@@ -530,20 +1032,27 @@ final class ItemSurface: SurfaceView {
     ExplorerPalette.surface.setFill(); bounds.fill()
     if selected || hovered { (selected ? ExplorerPalette.selection : ExplorerPalette.rowHover).setFill(); NSBezierPath(roundedRect: bounds, xRadius: 3, yRadius: 3).fill() }
     if bottomLine { ExplorerPalette.border.setFill(); NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill() }
+    if selectionFocused, ExplorerFocus.keyboardVisible, window?.isKeyWindow == true, window?.firstResponder is FileCollectionView {
+      drawFileSelectionFocus(bounds)
+    }
   }
 }
 final class IconItem: NSCollectionViewItem {
   let icon = FileIconView(); let nameLabel = label(""); let kindLabel = label("", size: 11, color: ExplorerPalette.secondary); let dateLabel = label("", size: 11, color: ExplorerPalette.secondary); let pathLabel = label("", size: 11, color: ExplorerPalette.secondary)
   let checkbox = ExplorerCheckbox()
   private let surface = ItemSurface()
+  var selectionFocused: Bool {
+    get { surface.selectionFocused }
+    set { surface.selectionFocused = newValue }
+  }
   var mode: ExplorerLayoutMode = .icons; var iconSize: CGFloat = 64; var checkboxes = false
   override func loadView() { view = surface; [icon, nameLabel, kindLabel, dateLabel, pathLabel, checkbox].forEach(view.addSubview); icon.imageScaling = .scaleProportionallyUpOrDown }
   override var isSelected: Bool { didSet { surface.selected = isSelected; checkbox.state = isSelected ? .on : .off } }
   override func viewDidLayout() {
     super.viewDidLayout(); let width = view.bounds.width, height = view.bounds.height
     let horizontal = mode != .icons || iconSize == 32
-    let size: CGFloat = mode == .list ? 22 : mode == .tiles ? 48 : mode == .content ? 56 : iconSize
-    let leading: CGFloat = checkboxes && horizontal ? 30 : 12
+    let size: CGFloat = mode == .list ? HorizontalFileGeometry.listIconSize : mode == .tiles ? 48 : mode == .content ? 56 : iconSize
+    let leading = mode == .list ? HorizontalFileGeometry.listIconLeading : HorizontalFileGeometry.leading(checkboxes: checkboxes && horizontal)
     checkbox.available = checkboxes; checkbox.hovered = surface.hovered; checkbox.frame = NSRect(x: 7, y: horizontal ? (height - 14) / 2 : 8, width: 14, height: 14)
     nameLabel.alignment = horizontal ? .left : .center; nameLabel.maximumNumberOfLines = horizontal ? 1 : 2
     nameLabel.lineBreakMode = horizontal ? .byTruncatingTail : nameLabel.isEditable ? .byCharWrapping : .byWordWrapping
@@ -552,7 +1061,9 @@ final class IconItem: NSCollectionViewItem {
     surface.bottomLine = mode == .content
     if horizontal {
       icon.frame = NSRect(x: leading, y: (height - size) / 2, width: size, height: size)
-      let textX = leading + size + 9, textWidth = max(20, (mode == .content ? width * 0.55 : width) - textX - 12)
+      let textX = mode == .list ? HorizontalFileGeometry.listNameLeading : HorizontalFileGeometry.nameLeading(iconLeading: leading, iconSize: size)
+      let textWidth = mode == .list ? max(0, width - textX - HorizontalFileGeometry.listTrailing) :
+        HorizontalFileGeometry.nameWidth(in: mode == .content ? width * 0.55 : width, leading: textX)
       let twoLines = mode == .tiles || mode == .content
       let line = ExplorerTypography.lineHeight
       let top = height / 2 - (twoLines ? line + 2 : line / 2)
@@ -574,5 +1085,5 @@ final class IconItem: NSCollectionViewItem {
     view.toolTip = entry.url.path; icon.show(entry, pixels: size > 64 ? 256 : size > 32 ? 128 : 64); surface.selected = isSelected; view.needsLayout = true
     view.setAccessibilityLabel(entry.name)
   }
-  override func prepareForReuse() { super.prepareForReuse(); icon.clear(); checkbox.changed = nil; nameLabel.delegate = nil; nameLabel.abortEditing(); nameLabel.isEditable = false; nameLabel.isSelectable = false; nameLabel.isBordered = false; nameLabel.drawsBackground = false }
+  override func prepareForReuse() { super.prepareForReuse(); surface.selected = false; icon.clear(); checkbox.changed = nil; nameLabel.delegate = nil; nameLabel.abortEditing(); nameLabel.isEditable = false; nameLabel.isSelectable = false; nameLabel.isBordered = false; nameLabel.drawsBackground = false }
 }

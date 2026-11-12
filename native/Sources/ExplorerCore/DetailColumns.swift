@@ -1,7 +1,6 @@
 import Foundation
 import CoreFoundation
 
-/// User intent only. Responsive hiding and fitted widths must never be persisted here.
 public struct DetailColumns: Equatable, Sendable {
   public static let identifiers = ["name", "modified", "created", "kind", "size"]
   public static let defaultWidths: [String: Double] = ["name": 450, "modified": 165, "created": 165, "kind": 132, "size": 100]

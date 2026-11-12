@@ -33,7 +33,7 @@ enum NativeRefreshChecks {
       browser.setView(mode); window.contentView?.layoutSubtreeIfNeeded()
       let selected = folder.appendingPathComponent("File 040.txt").path
       browser.selectedPaths = [selected]; browser.updateMode(persist: false)
-      let scroll = mode == .details ? browser.tableScroll : browser.collectionScroll
+      let scroll = browser.fileScroll
       let before = browser.entries
       browser.reload()
       try check(browser.loading && browser.entries == before && !scroll.isHidden && browser.loadingView.isHidden, "\(mode): same-directory refresh retains contents without a loading placeholder")
@@ -53,11 +53,12 @@ enum NativeRefreshChecks {
     let moved = folder.appendingPathComponent("File 000.txt")
     try fm.moveItem(at: moved, to: other.appendingPathComponent(moved.lastPathComponent))
     browser.finishedDragging(.move)
-    try check(!browser.loading && !browser.collectionScroll.isHidden, "A successful drag refreshes in the background")
+    try check(!browser.loading && !browser.fileScroll.isHidden, "A successful drag refreshes in the background")
     try await until { !browser.entries.contains { $0.id == moved.path } }
     try check(browser.entries.count == 79, "Completed drag removes the moved file from the source listing")
     browser.navigate(to: other)
-    try check(browser.entries.isEmpty && !browser.loadingView.isHidden, "Navigating to a different directory clears the previous directory")
+    try check(browser.entries.isEmpty && browser.fileScroll.isHidden && browser.loadingView.isHidden,
+              "Navigating to a different directory clears the previous rows without flashing a loading placeholder")
     try await until { !browser.loading && browser.entries.count == 1 }
     try fm.moveItem(at: other, to: root.appendingPathComponent("renamed"))
     browser.reload(); try await until { !browser.loading }
