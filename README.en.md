@@ -149,4 +149,4 @@ We follow SemVer: PATCH for compatible fixes, MINOR for compatible features, and
 
 ---
 
-[GPL-3.0 license](LICENSE) · Interface icons include [Lucide artwork (ISC)](native/ICON-LICENSE.txt)
+[AGPL-3.0 license](LICENSE) · Interface icons include [Lucide artwork (ISC)](native/ICON-LICENSE.txt)

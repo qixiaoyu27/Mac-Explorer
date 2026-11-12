@@ -22,7 +22,7 @@ try {
   await open();
   const info = await page.evaluate(() => window.explorer.about());
   assert.equal(info.version, version);
-  assert.equal(info.author, 'qixiaoyu27'); assert.equal(info.license, 'GPL-3.0-only');
+  assert.equal(info.author, 'qixiaoyu27'); assert.equal(info.license, 'AGPL-3.0-only');
   await page.getByRole('heading', { name: 'Mac Explorer', exact: true }).waitFor();
   await assert.rejects(page.evaluate(() => window.explorer.openProject('https://example.com')), /无效/);
   await app.evaluate(({ shell }) => { globalThis.openedProjectURLs = []; shell.openExternal = async url => { globalThis.openedProjectURLs.push(url); }; });

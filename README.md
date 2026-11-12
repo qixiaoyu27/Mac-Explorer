@@ -149,4 +149,4 @@
 
 ---
 
-[GPL-3.0 开源许可](LICENSE) · 界面图标包含 [Lucide artwork（ISC）](native/ICON-LICENSE.txt)
+[AGPL-3.0 开源许可](LICENSE) · 界面图标包含 [Lucide artwork（ISC）](native/ICON-LICENSE.txt)

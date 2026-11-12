@@ -1436,7 +1436,7 @@ final class EDSettingsBody: EDView {
       }
       return 30
     }
-    let copyright = edLabel("© 2026 qixiaoyu27 · GPL-3.0-only", size: 12)
+    let copyright = edLabel("© 2026 qixiaoyu27 · AGPL-3.0-only", size: 12)
     copyright.textColor = ExplorerPalette.secondary; copyright.alignment = .center
     content.flow.add(copyright) { _ in 24 }
   }

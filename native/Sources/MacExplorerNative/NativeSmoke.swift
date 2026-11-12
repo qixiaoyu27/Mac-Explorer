@@ -367,7 +367,7 @@ enum NativeSmoke {
         button.performClick(nil); try await Task.sleep(nanoseconds: 100_000_000)
         if title == "关于" {
           let text = dialogText(window).joined(separator: "\n")
-          guard text.contains("尚未检查更新"), text.contains("GPL-3.0-only"), !text.contains("当前版本："),
+          guard text.contains("尚未检查更新"), text.contains("AGPL-3.0-only"), !text.contains("当前版本："),
                 ["项目主页", "GitHub 发布页", "问题反馈", "开源许可", "检查更新"].allSatisfy({ title in dialogButtons(window).contains { $0.title == title } })
           else { throw Failure(description: "About page is missing migrated content") }
         }
