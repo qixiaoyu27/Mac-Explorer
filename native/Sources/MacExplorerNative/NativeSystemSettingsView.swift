@@ -5,8 +5,8 @@ final class NativeSystemSettingsView: SurfaceView {
   var preferredHeight: CGFloat { status.stringValue.isEmpty ? 28 : 58 }
   var onHeightChange: (() -> Void)?
   private let integration: NativeSystemIntegration
-  private let viewer = EDButton(title: NL("使用 Mac Explorer 显示文件"), style: .checkbox)
-  private let help = NativeHelpButton(text: NL("使用 Mac Explorer 处理部分系统“在文件夹中显示”请求；关闭后恢复原设置。Finder 仍保留。"), accessibilityLabel: NL("系统文件查看器说明"))
+  private let viewer = EDButton(title: NL("接收系统文件定位请求"), style: .checkbox)
+  private let help = NativeHelpButton(text: NL("处理部分系统“在文件夹中显示”请求，不接管桌面双击；关闭后恢复原设置。"), accessibilityLabel: NL("系统文件查看器说明"))
   private let status = label("", size: 12)
   init(integration: NativeSystemIntegration) {
     self.integration = integration; super.init(frame: .zero); color = .clear
@@ -34,6 +34,44 @@ final class NativeSystemSettingsView: SurfaceView {
     viewer.frame = NSRect(x: 0, y: 0, width: width - 32, height: 28); help.frame = NSRect(x: width - 24, y: 0, width: 24, height: 28)
     status.frame = NSRect(x: 0, y: 30, width: width, height: 28); status.maximumNumberOfLines = 2
   }
+}
+
+final class NativeDesktopSettingsView: SurfaceView {
+  var preferredHeight: CGFloat { status.stringValue.isEmpty ? 72 : 100 }
+  var onHeightChange: (() -> Void)?
+  private let desktop: NativeDesktop
+  let toggle = EDButton(title: NL("使用 Mac Explorer 管理桌面"), style: .checkbox)
+  let restore = EDButton(title: NL("恢复 Finder 桌面"), style: .secondary)
+  private let help = NativeHelpButton(text: NL("桌面图标自动排列在主显示器，双击文件夹打开 Mac Explorer。其他显示器显示壁纸；动态壁纸使用静态图像。关闭或退出应用后恢复 Finder 桌面。"), accessibilityLabel: NL("桌面模式说明"))
+  private let status = label("", size: 12)
+  private var observer: NSObjectProtocol?
+
+  init(desktop: NativeDesktop) {
+    self.desktop = desktop; super.init(frame: .zero); color = .clear
+    [toggle, restore, help, status].forEach(addSubview)
+    toggle.onPress = { [weak self] in self?.setEnabled(!desktop.isEnabled) }
+    restore.onPress = { [weak self] in self?.setEnabled(false) }
+    observer = NotificationCenter.default.addObserver(forName: NativeDesktop.changed, object: desktop, queue: .main) { [weak self] _ in self?.refresh() }
+    refresh()
+  }
+  required init?(coder: NSCoder) { fatalError() }
+  private func refresh() {
+    toggle.checked = desktop.isEnabled
+    restore.isEnabled = desktop.isEnabled || desktop.defaults.bool(forKey: NativeDesktop.preferenceKey)
+    status.stringValue = desktop.error; needsLayout = true; onHeightChange?()
+  }
+  private func setEnabled(_ enabled: Bool) {
+    do { try desktop.setEnabled(enabled); refresh() }
+    catch { status.stringValue = NL(error.localizedDescription); onHeightChange?() }
+  }
+  override func layout() {
+    super.layout()
+    toggle.frame = NSRect(x: 0, y: 0, width: max(0, bounds.width - 32), height: 28)
+    help.frame = NSRect(x: bounds.width - 24, y: 0, width: 24, height: 28)
+    restore.frame = NSRect(x: 0, y: 36, width: min(bounds.width, 240), height: 34)
+    status.frame = NSRect(x: 0, y: 76, width: bounds.width, height: 22)
+  }
+  deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
 }
 
 final class NativeWakeSettingsView: SurfaceView {

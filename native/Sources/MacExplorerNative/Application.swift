@@ -61,7 +61,9 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     NSApp.appearance = appearance == "system" ? nil : NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
     systemIntegration = NativeSystemIntegration(defaults: defaults, onWake: { [weak self] in
       self?.summon()
-    })
+    }, onOpenDesktopFolder: { [weak self] in self?.openDesktopFolder($0) })
+    systemIntegration?.desktop.onFocus = { [weak self] in self?.makeMenus() }
+    systemIntegration?.desktop.onLanguageChange = { [weak self] mode in self?.setLanguage(mode, defaults: defaults) }
     versionControl.setEnabled(defaults.object(forKey: "versionControl") as? Bool ?? true)
     let home = ProcessInfo.processInfo.environment["EXPLORER_NATIVE_HOME"].map { URL(fileURLWithPath: $0) } ?? FileManager.default.homeDirectoryForCurrentUser
     browser = BrowserController(initial: NativeStartLocation.initialURL(explicit: quitFixture == nil ? explicitLocation : nil, defaults: defaults, home: home), defaults: defaults)
@@ -96,6 +98,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     if (quitFixture != nil || smoke == nil && comparison == nil) && argument("--path") == nil && pendingExternalURLs.isEmpty { restoreWindows(defaults: defaults) }
     if !pendingExternalURLs.isEmpty { let urls = pendingExternalURLs; pendingExternalURLs = []; openExternal(urls) }
     if smoke == nil && comparison == nil { DispatchQueue.main.async { [weak self] in self?.offerFileViewer() } }
+    if smoke == nil && comparison == nil { systemIntegration?.desktop.restoreOnLaunch() }
     if let comparison, let report = argument("--report") {
       Task { @MainActor in
         await NativeSmoke.compare(browser: browser, window: window, root: URL(fileURLWithPath: comparison), report: URL(fileURLWithPath: report))
@@ -183,6 +186,12 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     if window?.isMiniaturized == true { window?.deminiaturize(nil) }
     window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
   }
+  func openDesktopFolder(_ url: URL) {
+    let source = browser ?? BrowserController(initial: url, defaults: sessionDefaults ?? .standard)
+    let point = window.map { NSPoint(x: $0.frame.minX + 180, y: $0.frame.maxY - 20) } ?? NSEvent.mouseLocation
+    createWindow(tab: BrowserTab(history: [url]), source: source, at: point)
+    NSApp.activate(ignoringOtherApps: true)
+  }
   @objc private func dockNewTab() {
     if browser == nil { newWindow() } else { browser.newTab() }
     summon()
@@ -191,10 +200,14 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     let menu = NSMenu()
     menu.addItem(withTitle: NL("新建窗口"), action: #selector(newWindow), keyEquivalent: "").target = self
     menu.addItem(withTitle: NL("新建选项卡"), action: #selector(dockNewTab), keyEquivalent: "").target = self
+    if let desktop = systemIntegration?.desktop, desktop.isEnabled {
+      menu.addItem(.separator())
+      menu.addItem(withTitle: NL("恢复 Finder 桌面"), action: #selector(NativeDesktop.restoreFinder), keyEquivalent: "").target = desktop
+    }
     return menu
   }
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-    if !hasVisibleWindows { summon() }
+    if !hasVisibleWindows || browserWindows.isEmpty { summon() }
     return true
   }
 
@@ -237,7 +250,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     let installingUpdate = updateInstaller != nil
     do {
-      guard !browserWindows.contains(where: { ($0.contentViewController as? BrowserController)?.busy == true }) else { throw NativeUpdateValidation.failure("文件操作正在进行中") }
+      guard systemIntegration?.desktop.isBusy != true, !browserWindows.contains(where: { ($0.contentViewController as? BrowserController)?.busy == true }) else { throw NativeUpdateValidation.failure("文件操作正在进行中") }
       if let defaults = sessionDefaults {
         let states = installingUpdate || (preserveWindowsOnExit ?? (defaults.object(forKey: NativeSessions.restoreAfterQuitKey) as? Bool ?? false)) ? browserWindows.compactMap { owner -> NativeSavedWindow? in
           guard let controller = owner.contentViewController as? BrowserController else { return nil }
@@ -282,7 +295,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     defaults.set(mode, forKey: "language")
     Task { @MainActor [weak self] in
       guard let self else { return }
-      while self.browserWindows.contains(where: { ($0.contentViewController as? BrowserController)?.busy == true }) { try? await Task.sleep(nanoseconds: 100_000_000) }
+      while self.systemIntegration?.desktop.isBusy == true || self.browserWindows.contains(where: { ($0.contentViewController as? BrowserController)?.busy == true }) { try? await Task.sleep(nanoseconds: 100_000_000) }
       NativeLanguage.mode = mode
       let current = self.window
       for owner in self.browserWindows {
@@ -295,6 +308,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         if settingsOpen { next.executeAction("settings") }
       }
       self.makeMenus()
+      if let desktop = self.systemIntegration?.desktop, desktop.isEnabled { desktop.close(); desktop.restoreOnLaunch() }
     }
   }
 
@@ -350,10 +364,10 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     addMenu(NL("窗口"), submenu: windowMenu, to: main)
     NSApp.windowsMenu = windowMenu
     NSApp.mainMenu = main
-    browser.syncMenuShortcuts()
+    (systemIntegration?.desktop.focusedBrowser ?? browser)?.syncMenuShortcuts()
   }
   private func item(_ title: String, _ action: Selector, _ key: String, in menu: NSMenu) {
-    let item = menu.addItem(withTitle: title, action: action, keyEquivalent: key); item.target = browser
+    let item = menu.addItem(withTitle: title, action: action, keyEquivalent: key); item.target = systemIntegration?.desktop.focusedBrowser ?? browser
   }
   private func addMenu(_ title: String, submenu: NSMenu, to menu: NSMenu) {
     let item = NSMenuItem(title: title, action: nil, keyEquivalent: ""); item.submenu = submenu; menu.addItem(item)

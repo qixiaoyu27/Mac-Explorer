@@ -22,6 +22,7 @@ struct BrowserTab {
 }
 
 final class BrowserController: NSViewController, NSMenuItemValidation, NSTableViewDataSource, NSTableViewDelegate, NSCollectionViewDataSource, NSCollectionViewDelegate, NSTextFieldDelegate, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
+  weak var desktop: NativeDesktop?
   var versionControl: NativeVersionControl?
   var systemIntegration: NativeSystemIntegration?
   private var vcsStatus: NativeVCSStatus?
@@ -183,7 +184,8 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   private var paneReadTask: Task<NativeFilePreview, Error>?
   private var panePreview: (FileEntry, NativeFilePreview)?
 
-  init(initial: URL, defaults: UserDefaults) {
+  init(initial: URL, defaults: UserDefaults, desktop: NativeDesktop? = nil) {
+    self.desktop = desktop
     self.defaults = defaults; places = QuickAccessState(defaults: defaults); tabs = [BrowserTab(history: [initial])]
     home = ProcessInfo.processInfo.environment["EXPLORER_NATIVE_HOME"].map { URL(fileURLWithPath: $0) } ?? FileManager.default.homeDirectoryForCurrentUser
     super.init(nibName: nil, bundle: nil)
@@ -244,6 +246,11 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     addressBar.onFileDrop = { [weak self] info, target in self?.acceptFiles(info, at: target, fromTab: true) ?? false }
     search.delegate = self; searchBox.onSearch = { [weak self] in self?.performSearch() }; searchBox.onClear = { [weak self] in self?.searchActive = false; self?.reload() }; searchBox.onFilters = { [weak self] in self?.showSearchFilters() }; searchBox.filtersActive = !searchFilters.isDefault
     buildCommands(); buildFileViews()
+    if desktop != nil {
+      root.color = .clear; content.color = .clear; collection.backgroundColors = [.clear]
+      fileScroll.drawsBackground = false; fileScroll.contentView.drawsBackground = false
+      [tabsBar, navigationBar, commandBar, sidebar, pane, footer].forEach { $0.isHidden = true }
+    }
     content.addSubview(specialView); specialView.isHidden = true
     specialView.onNavigate = { [weak self] in self?.navigate(to: $0) }
     specialView.onVolumesChanged = { [weak self] in self?.refreshProviderCloudDrives(force: true); self?.rebuildSidebar() }
@@ -439,6 +446,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   }
 
   func layoutChrome() {
+    if desktop != nil { layoutDesktop(); return }
     let width = view.bounds.width, height = view.bounds.height
     let sidebarWidth: CGFloat = navigationPane ? (width <= 900 ? 175 : width <= 1100 ? 185 : 208) : 0
     let paneWidth: CGFloat = paneMode.isEmpty ? 0 : (width <= 900 ? 242 : 276)
@@ -551,6 +559,20 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
       column.width = detailColumns.automatic ? (id == "name" ? max(column.minWidth, available - used) : metadata[id] ?? 100) : detailColumns.widths[id] ?? 100
     }
     syncingColumns = false
+  }
+
+  private func layoutDesktop() {
+    let width = view.bounds.width, height = view.bounds.height
+    let banner: CGFloat = lastError == nil ? 0 : 35
+    content.frame = NSRect(x: 0, y: banner, width: width, height: max(0, height - banner))
+    errorBar.frame = NSRect(x: 0, y: 0, width: width, height: banner); errorBar.isHidden = banner == 0
+    errorLabel.frame = NSRect(x: 16, y: 9, width: max(0, width - 160), height: 18)
+    errorClose.frame = NSRect(x: width - 35, y: 4, width: 27, height: 27)
+    privacySettings.frame = NSRect(x: width - 128, y: 4, width: 88, height: 27)
+    content.layoutViewport(filesVisible: !entries.isEmpty) {
+      collectionLayout.invalidateLayout(); collectionLayout.prepare()
+      collection.frame.size = collectionLayout.collectionViewContentSize
+    }
   }
 
   func rebuildTabs() {
@@ -855,6 +877,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   }
 
   func navigate(to url: URL, addHistory: Bool = true) {
+    if let desktop { desktop.openFolder(url); return }
     let target = url.standardizedFileURL
     let source = directory
     if addHistory && !sameLocation(target, source) {
@@ -1037,7 +1060,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     selectionManager.endTracking()
     let document: NSView = mode == .details ? table : collection
     content.rememberDocumentOrigin(beforeInstalling: document)
-    fileScroll.isHidden = loading || (mode == .details && entries.isEmpty)
+    fileScroll.isHidden = desktop == nil && (loading || (mode == .details && entries.isEmpty))
     let previousTopology = selectionManager.topology
     rebuildGroups()
     let canResolveSelection = pendingLocationState == nil || snapshot.map { sameLocation($0.directory, directory) } == true
@@ -1059,8 +1082,9 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     specialView.isHidden = !special
     let empty = !loading && entries.isEmpty && !special
     emptyLabel.isHidden = !empty; emptyIcon.isHidden = !empty
-    emptyIcon.image = search.stringValue.isEmpty ? ExplorerIcons.folder(size: 68) : ExplorerIcons.image("search", size: 42, color: ExplorerPalette.secondary)
-    updateLoadingPlaceholder(needed: loading && !special)
+    emptyIcon.image = desktop != nil ? nil : search.stringValue.isEmpty ? ExplorerIcons.folder(size: 68) : ExplorerIcons.image("search", size: 42, color: ExplorerPalette.secondary)
+    updateLoadingPlaceholder(needed: desktop == nil && loading && !special)
+    if desktop != nil { emptyLabel.isHidden = true; emptyIcon.isHidden = true; emptyState.isHidden = true }
     spinner.stopAnimation(nil); spinner.isHidden = true
     if lastError == nil { lastError = operationError }
     errorBar.color = lastError == nil ? ExplorerPalette.surface : ExplorerPalette.errorSurface
@@ -1093,6 +1117,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     newButton.isEnabled = !busy && writable; detailViewButton.active = mode == .details; iconViewButton.active = mode == .icons; previewButton.active = paneMode == "preview"
   }
   private func configureCollectionLayout() {
+    if desktop != nil { mode = .icons; paneMode = ""; groupMode = .none }
     guard mode != .details else { return }
     collection.autoresizingMask = mode == .list ? [.height] : [.width]
     // Give each layout organization its own instance, as recommended by AppKit.
@@ -1112,6 +1137,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   func setView(_ layout: ExplorerLayoutMode, size: CGFloat? = nil) { mode = layout; if let size { iconSize = size }; updateMode() }
   @objc private func resizeIcons() { iconSize = CGFloat((sizeSlider.doubleValue / 8).rounded() * 8); updateMode() }
   private func saveView(group: String = "layout") {
+    if desktop != nil { return }
     guard directory.isFileURL || directory.scheme == "explorer" else { return }
     let key = directory.isFileURL ? directory.path : directory.absoluteString
     savedFolderViews = defaults.dictionary(forKey: "folderViews") as? [String: [String: Any]] ?? [:]
@@ -1142,6 +1168,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     defaults.set(savedFolderViews, forKey: "folderViews")
   }
   private func restoreView(_ url: URL, touch: Bool = false) {
+    if desktop != nil { mode = .icons; iconSize = 64; paneMode = ""; configureCollectionLayout(); return }
     guard url.isFileURL || url.scheme == "explorer" else { return }
     let key = url.isFileURL ? url.path : url.absoluteString
     savedFolderViews = defaults.dictionary(forKey: "folderViews") as? [String: [String: Any]] ?? [:]
@@ -1404,6 +1431,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     guard let index = entryIndex(at: indexPath.item) else { item.view.isHidden = true; return item }
     let entry = entries[index]; item.view.isHidden = false
     item.configure(entry, name: displayName(entry), mode: mode, size: iconSize, checkboxes: checkboxes)
+    if desktop != nil { item.setDesktopAppearance() }
     item.selectionFocused = selectionManager.state.focus.flatMap { selectionManager.topology.rowByNode[$0] } == indexPath.item
     item.checkbox.changed = { [weak self] in self?.toggleSelection(at: indexPath.item, selected: $0) }; return item
   }
@@ -1439,12 +1467,13 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     tabs = [tab]; activeTab = 0; prepareLocationState(tab.locationStates[tab.index] ?? BrowserLocationState()); restoreView(tab.directory, touch: true)
   }
   func openTab(at url: URL) {
+    if let desktop { desktop.openFolder(url); return }
     rememberLocationState()
     tabs.append(BrowserTab(history: [url])); activeTab = tabs.count - 1; prepareLocationState(BrowserLocationState()); search.stringValue = ""; searchActive = false; restoreView(directory, touch: true); reload()
     view.layoutSubtreeIfNeeded(); tabsDocument.subviews.last?.scrollToVisible(tabsDocument.subviews.last!.bounds)
   }
   @objc func newTab() { openTab(at: NativeStartLocation.load(defaults).url(home: home, defaults: defaults)) }
-  @objc func closeTab() { closeTab(at: activeTab) }
+  @objc func closeTab() { if desktop != nil { return }; closeTab(at: activeTab) }
   private func closeTab(at index: Int) {
     guard tabs.indices.contains(index) else { return }
     if tabs.count == 1 { view.window?.close(); return }
@@ -1463,8 +1492,8 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   @objc func back() { travelHistory(-1) }
   @objc func forward() { travelHistory(1) }
   @objc func up() { navigate(to: directory.deletingLastPathComponent()) }
-  @objc func focusAddress() { addressBar._SetFocusAndEditMode() }
-  @objc func focusSearch() { view.window?.makeFirstResponder(search); search.selectText(nil) }
+  @objc func focusAddress() { if let desktop { desktop.openFolder(directory); return }; addressBar._SetFocusAndEditMode() }
+  @objc func focusSearch() { if let desktop { desktop.openFolder(directory); return }; view.window?.makeFirstResponder(search); search.selectText(nil) }
   private func openAddressDestination(_ destination: AddressDestination) throws {
     switch destination {
     case .location(let url):
@@ -1603,6 +1632,9 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     return [ExplorerMenuItem(title: NL("打开文件夹…"), icon: "folder", action: { [weak self] in self?.chooseDirectory() }), ExplorerMenuItem(title: pinned ? NL("从快速访问取消固定") : NL("固定到快速访问"), icon: "pin", enabled: target != nil, action: { [weak self] in if let target { self?.togglePin(target) } }), ExplorerMenuItem(title: NL("全选"), shortcut: shortcutHint("select-all"), action: { [weak self] in self?.selectAllFiles() }), ExplorerMenuItem(title: NL("全不选"), action: { [weak self] in self?.selectionManager.SelectionChange(.clear) }), ExplorerMenuItem(title: NL("撤销"), icon: "undo", enabled: !undoChanges.isEmpty && !busy, divider: true, shortcut: shortcutHint("undo"), action: { [weak self] in self?.undoFiles() }), ExplorerMenuItem(title: NL("重做"), enabled: !redoChanges.isEmpty && !busy, shortcut: shortcutHint("redo"), action: { [weak self] in self?.redoFiles() }), ExplorerMenuItem(title: NL("选项"), icon: "settings", divider: true, action: { [weak self] in self?.showSettings() })]
   }
   func contextItems() -> [ExplorerMenuItem] {
+    fileContextItems() + (desktop?.menuItems() ?? [])
+  }
+  private func fileContextItems() -> [ExplorerMenuItem] {
     let chosen = selectedEntries(), first = selectedEntries().first
     let canPaste = !busy && writable && (!clipboard.isEmpty || filePasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]))
     let refresh = ExplorerMenuItem(title: NL("刷新"), icon: "refresh", shortcut: shortcutHint("refresh"), action: { [weak self] in self?.executeAction("refresh") })
@@ -1692,7 +1724,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     return true
   }
 
-  private func togglePane(_ name: String) { paneMode = paneMode == name ? "" : name; defaults.set(paneMode, forKey: "paneMode"); updatePane(); updateStatus(); view.needsLayout = true }
+  private func togglePane(_ name: String) { if desktop != nil { return }; paneMode = paneMode == name ? "" : name; defaults.set(paneMode, forKey: "paneMode"); updatePane(); updateStatus(); view.needsLayout = true }
   private func updatePane() {
     let count = selectedEntryCount
     let index = selectedRows.first.flatMap(entryIndex) ?? selectedHiddenEntries.first
@@ -1844,7 +1876,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     }
     guard let field else { return }
     renamingEntry = entry; renameField = field; field.identifier = NSUserInterfaceItemIdentifier(entry.id)
-    field.stringValue = entry.name; field.isEditable = true; field.isSelectable = true; field.isBordered = true; field.drawsBackground = true; field.backgroundColor = ExplorerPalette.surface; field.focusRingType = .none
+    field.stringValue = entry.name; field.isEditable = true; field.isSelectable = true; field.isBordered = true; field.drawsBackground = true; field.backgroundColor = ExplorerPalette.surface; field.textColor = ExplorerPalette.text; field.focusRingType = .none
     field.delegate = self; field.target = self; field.action = #selector(commitInlineRename)
     field.superview?.needsLayout = true; field.superview?.layoutSubtreeIfNeeded()
     view.window?.makeFirstResponder(field)

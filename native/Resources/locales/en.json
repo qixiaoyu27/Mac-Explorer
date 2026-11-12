@@ -1053,5 +1053,14 @@
   "删除 ⌘⌫": "Delete ⌘⌫",
   "全不选": "Select none",
   "选项": "Options",
-  "压缩为 ZIP 文件": "Compress to ZIP file"
+  "压缩为 ZIP 文件": "Compress to ZIP file",
+  "接收系统文件定位请求": "Receive system file reveal requests",
+  "处理部分系统“在文件夹中显示”请求，不接管桌面双击；关闭后恢复原设置。": "Handles some system Reveal in Folder requests, but not desktop double-clicks. Turning it off restores the previous settings.",
+  "桌面（实验）": "Desktop (experimental)",
+  "使用 Mac Explorer 管理桌面": "Use Mac Explorer for the desktop",
+  "恢复 Finder 桌面": "Restore Finder desktop",
+  "桌面模式说明": "Desktop mode help",
+  "在 Mac Explorer 中打开桌面": "Open Desktop in Mac Explorer",
+  "没有可用的显示器。": "No display is available.",
+  "桌面图标自动排列在主显示器，双击文件夹打开 Mac Explorer。其他显示器显示壁纸；动态壁纸使用静态图像。关闭或退出应用后恢复 Finder 桌面。": "Desktop icons are arranged automatically on the primary display. Double-click folders to open Mac Explorer. Other displays show wallpaper; dynamic wallpapers use a still image. Turn this off or quit the app to restore the Finder desktop."
 }

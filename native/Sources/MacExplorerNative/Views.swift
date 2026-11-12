@@ -985,6 +985,7 @@ final class ExplorerCollectionLayout: NSCollectionViewLayout {
   }
 }
 final class ItemSurface: SurfaceView {
+  var desktopAppearance = false
   var selected = false {
     didSet {
       if !selected { removeExpandedName() }
@@ -1029,8 +1030,14 @@ final class ItemSurface: SurfaceView {
   override func mouseEntered(with event: NSEvent) { hovered = explorerPointerIsInside(self) }
   override func mouseExited(with event: NSEvent) { hovered = explorerPointerIsInside(self) }
   override func draw(_ dirtyRect: NSRect) {
-    ExplorerPalette.surface.setFill(); bounds.fill()
+    color.setFill(); bounds.fill()
     if selected || hovered { (selected ? ExplorerPalette.selection : ExplorerPalette.rowHover).setFill(); NSBezierPath(roundedRect: bounds, xRadius: 3, yRadius: 3).fill() }
+    if desktopAppearance, let name = subviews.compactMap({ $0 as? NSTextField }).first(where: { $0.identifier != nil }), !name.isEditable {
+      let measured = (name.stringValue as NSString).boundingRect(with: NSSize(width: max(1, name.frame.width - 4), height: 1000), options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: name.font ?? NSFont.systemFont(ofSize: 12)])
+      let width = min(name.frame.width, ceil(measured.width) + 8), height = min(name.frame.height, ceil(measured.height) + 4)
+      NSColor.black.withAlphaComponent(0.7).setFill()
+      NSBezierPath(roundedRect: NSRect(x: name.frame.midX - width / 2, y: name.frame.minY, width: width, height: height), xRadius: 3, yRadius: 3).fill()
+    }
     if bottomLine { ExplorerPalette.border.setFill(); NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill() }
     if selectionFocused, ExplorerFocus.keyboardVisible, window?.isKeyWindow == true, window?.firstResponder is FileCollectionView {
       drawFileSelectionFocus(bounds)
@@ -1084,6 +1091,22 @@ final class IconItem: NSCollectionViewItem {
     pathLabel.stringValue = NL("位置：") + entry.url.deletingLastPathComponent().path
     view.toolTip = entry.url.path; icon.show(entry, pixels: size > 64 ? 256 : size > 32 ? 128 : 64); surface.selected = isSelected; view.needsLayout = true
     view.setAccessibilityLabel(entry.name)
+  }
+  func setDesktopAppearance() {
+    surface.desktopAppearance = true
+    surface.color = .clear
+    nameLabel.textColor = .white
+    nameLabel.drawsBackground = false
+    // Desktop layer updates can request custom image reps without a graphics context.
+    if let image = icon.image {
+      let pixels = Int(iconSize * (view.window?.backingScaleFactor ?? 2))
+      if let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0), let context = NSGraphicsContext(bitmapImageRep: bitmap) {
+        NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = context
+        image.draw(in: NSRect(x: 0, y: 0, width: pixels, height: pixels), from: .zero, operation: .sourceOver, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+        if let cgImage = bitmap.cgImage { icon.image = NSImage(cgImage: cgImage, size: NSSize(width: iconSize, height: iconSize)) }
+      }
+    }
   }
   override func prepareForReuse() { super.prepareForReuse(); surface.selected = false; icon.clear(); checkbox.changed = nil; nameLabel.delegate = nil; nameLabel.abortEditing(); nameLabel.isEditable = false; nameLabel.isSelectable = false; nameLabel.isBordered = false; nameLabel.drawsBackground = false }
 }

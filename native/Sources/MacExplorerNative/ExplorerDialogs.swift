@@ -290,7 +290,7 @@ fileprivate final class EDPresentation {
       child.hidesOnDeactivate = false
       child.isFloatingPanel = false
       child.collectionBehavior = [.fullScreenAuxiliary]
-      child.level = parent.level
+      child.level = parent is NativeDesktopWindow ? .normal : parent.level
       child.appearance = parent.effectiveAppearance
     }
     dim.hasShadow = false
@@ -1230,6 +1230,10 @@ final class EDSettingsBody: EDView {
       extra.onHeightChange = { [weak self] in self?.content.needsLayout = true }
       content.flow.add(favorites) { _ in extra.preferredHeight + 26 }
       if let integration = browser.systemIntegration {
+        let desktopGroup = EDGroup(NL("桌面（实验）")), desktop = NativeDesktopSettingsView(desktop: integration.desktop)
+        desktopGroup.content.addSubview(desktop); desktopGroup.arrange = { desktop.frame = $0 }
+        desktop.onHeightChange = { [weak self] in self?.content.needsLayout = true }
+        content.flow.add(desktopGroup) { _ in desktop.preferredHeight + 26 }
         let group = EDGroup(NL("系统文件查看器（实验）")), system = NativeSystemSettingsView(integration: integration)
         group.content.addSubview(system); group.arrange = { system.frame = $0 }
         system.onHeightChange = { [weak self] in self?.content.needsLayout = true }

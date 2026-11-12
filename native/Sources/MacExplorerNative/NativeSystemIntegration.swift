@@ -11,11 +11,15 @@ final class NativeSystemIntegration {
   private(set) var wakeShortcut = ""
   private(set) var wakeError = ""
   let fileViewer: NativeFileViewer
-  init(defaults: UserDefaults, onWake: @escaping () -> Void) {
+  let desktop: NativeDesktop
+  init(defaults: UserDefaults, onWake: @escaping () -> Void, onOpenDesktopFolder: @escaping (URL) -> Void = { _ in }) {
     self.defaults = defaults; self.onWake = onWake
+    let home = ProcessInfo.processInfo.environment["EXPLORER_NATIVE_HOME"].map { URL(fileURLWithPath: $0) } ?? FileManager.default.homeDirectoryForCurrentUser
+    desktop = NativeDesktop(defaults: defaults, directory: home.appendingPathComponent("Desktop"), openFolder: onOpenDesktopFolder)
     let fixtureRoot = ProcessInfo.processInfo.environment["MAC_EXPLORER_NATIVE_SYSTEM_FIXTURE"].map { URL(fileURLWithPath: $0) }
     let folder = fixtureRoot ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Mac Explorer Native")
     fileViewer = NativeFileViewer(backupURL: folder.appendingPathComponent("native-file-viewer-backup.plist"), fixture: fixtureRoot?.appendingPathComponent("native-file-viewer-system.plist"), appExists: { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil })
+    desktop.integration = self
     var type = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
     let result = InstallEventHandler(GetApplicationEventTarget(), { _, _, context -> OSStatus in
       guard let context else { return OSStatus(eventNotHandledErr) }
@@ -32,6 +36,7 @@ final class NativeSystemIntegration {
     fileViewer.shouldPromptAtLaunch(suppressed: defaults.bool(forKey: NativeFileViewer.promptSuppressedKey), bundleID: Bundle.main.bundleIdentifier)
   }
   func close() {
+    desktop.close()
     if let hotKey { UnregisterEventHotKey(hotKey); self.hotKey = nil }
     if let handler { RemoveEventHandler(handler); self.handler = nil }
   }
