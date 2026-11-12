@@ -211,7 +211,10 @@ enum NativeAddressTabChecks {
       guard let row = window.childWindows?.flatMap({ descendants($0.contentView) }).first(where: { $0.accessibilityLabel() == title }) else {
         throw failure("Missing address menu item " + title)
       }
-      row.mouseUp(with: rightClick)
+      let release = NSEvent.mouseEvent(with: .leftMouseUp,
+        location: row.convert(NSPoint(x: row.bounds.midX, y: row.bounds.midY), to: nil), modifierFlags: [],
+        timestamp: 0, windowNumber: row.window!.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0)!
+      row.mouseUp(with: release)
     }
     try chooseAddressMenuItem(NL("复制地址"))
     try check(browser.filePasteboard.string(forType: .string) == docs.path && browser.filePasteboard.string(forType: .fileURL) != nil, "Copy address writes both the path and its file reference")

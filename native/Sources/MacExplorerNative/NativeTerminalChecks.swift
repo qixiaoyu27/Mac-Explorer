@@ -45,7 +45,7 @@ enum NativeTerminalChecks {
     try check(try choice().title == "自动选择", "General settings defaults to automatic terminal selection")
     let button = try choice(); button.performClick(nil)
     guard let row = controls().first(where: { $0.accessibilityRole() == .menuItem && $0.accessibilityLabel() == "Terminal" }),
-      let event = NSEvent.mouseEvent(with: .leftMouseUp, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: row.window!.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0) else { throw NativeSmoke.Failure(description: "Installed Terminal option missing") }
+      let event = NSEvent.mouseEvent(with: .leftMouseUp, location: row.convert(NSPoint(x: row.bounds.midX, y: row.bounds.midY), to: nil), modifierFlags: [], timestamp: 0, windowNumber: row.window!.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0) else { throw NativeSmoke.Failure(description: "Installed Terminal option missing") }
     row.mouseUp(with: event)
     try check(browser.defaults.string(forKey: key) == "com.apple.Terminal", "Selecting a terminal immediately saves the ME preference")
     ExplorerDialogs.close(in: window); browser.executeAction("settings")

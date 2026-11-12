@@ -326,9 +326,10 @@ enum NativeSelectionChecks {
     }
     window.contentView?.layoutSubtreeIfNeeded()
     pane.scrollTo(.zero)
-    window.makeKeyAndOrderFront(nil)
     if #available(macOS 14, *) { NSApp.activate() }
     else { NSApp.activate(ignoringOtherApps: true) }
+    try await NativeSmoke.until { NSApp.isActive }
+    window.makeKeyAndOrderFront(nil)
     try await NativeSmoke.until { window.isKeyWindow }
     window.makeFirstResponder(collection)
     guard browser.fileScroll === scroll, scroll.contentView === clip, scroll.documentView === collection,
