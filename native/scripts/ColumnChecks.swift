@@ -12,12 +12,16 @@ enum ColumnChecks {
     try check(DetailColumns(propertyList: nil) == nil, "Missing columns inherit without migration writes")
     try check(DetailColumns(propertyList: ["version": 2]) == nil, "Unknown schema inherits safely")
     try check(DetailColumns(propertyList: "invalid") == nil, "Invalid group inherits safely")
-    var custom = original; custom.automatic = false; custom.order = ["name", "size", "created", "modified", "kind"]; custom.visible.remove("kind"); custom.widths["created"] = 214
+    var custom = original; custom.automatic = false; custom.order = ["name", "size", "created", "modified", "kind", "added"]; custom.visible.remove("kind"); custom.widths["created"] = 214
     try check(DetailColumns(propertyList: custom.propertyList) == custom, "User order, visibility and widths round-trip independently")
+    let legacy = DetailColumns(propertyList: ["version": 1, "order": ["name", "size", "created", "modified", "kind"], "visible": ["name", "size"]])!
+    try check(legacy.order == custom.order && !legacy.visible.contains("added"), "Legacy custom order survives with Added appended and hidden")
+    custom.visible.insert("added"); custom.widths["added"] = 190
+    try check(DetailColumns(propertyList: custom.propertyList) == custom, "Added visibility and width round-trip")
     let data = try PropertyListSerialization.data(fromPropertyList: custom.propertyList, format: .binary, options: 0)
     try check(DetailColumns(propertyList: PropertyListSerialization.propertyList(from: data, format: nil)) == custom, "Binary preferences round-trip")
     let repaired = DetailColumns(propertyList: ["version": 1, "order": ["size", "size", "future", "name"], "visible": ["future", "size"], "widths": ["name": -1, "size": 0, "created": Double.infinity, "modified": true, "kind": "132"]])!
-    try check(repaired.order == ["size", "name", "modified", "created", "kind"], "Duplicates and unknown columns cannot replace required identifiers")
+    try check(repaired.order == ["size", "name", "modified", "created", "added", "kind"], "Duplicates and unknown columns cannot replace required identifiers")
     try check(repaired.visible == ["name", "size"], "Name cannot be hidden and unknown identifiers are ignored")
     try check(repaired.widths == original.widths, "Negative, zero, infinite, boolean and string widths use defaults")
     try check(DetailColumns(propertyList: ["version": 1, "visible": []])!.visible == ["name"], "An empty visibility list still shows Name")

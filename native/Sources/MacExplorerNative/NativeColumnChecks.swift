@@ -237,7 +237,7 @@ enum NativeColumnChecks {
     func folder() -> [String: Any] { (defaults.dictionary(forKey: "folderViews") as? [String: [String: Any]])?[root.path] ?? [:] }
     try check(browser.detailColumns.automatic && defaults.dictionary(forKey: "folderViews") == nil, "Legacy folder preferences keep responsive columns without migration writes")
     try check(browser.columnMenu().first { $0.title == NL("名称") }?.enabled == false, "Name remains visible and cannot be unchecked")
-    try check(browser.viewMenu().first { $0.title == NL("列") }?.children.count == 6, "View menu exposes the same five columns and reset")
+    try check(browser.viewMenu().first { $0.title == NL("列") }?.children.count == 7, "View menu exposes the same six columns and reset")
     try headerMenu(browser, window: window); try click(NL("修改日期"), owner: window)
     window.contentView?.layoutSubtreeIfNeeded()
     try check(!browser.detailColumns.automatic && column("modified").isHidden && !column("name").isHidden, "Header context click hides only the chosen column")

@@ -45,6 +45,9 @@ enum NativeCreatedDateChecks {
       var info = stat(); let readback = fstat(fd, &info); close(fd)
       guard result == 0, readback == 0, info.st_birthtimespec.tv_sec == Int(created), info.st_mtimespec.tv_sec == Int(modified) else { throw failure("Date fixture readback mismatch") }
     }
+    for (name, seconds) in [("new.txt", 1_730_000_000.0), ("Folder", 1_720_000_000.0), ("old10.txt", 1_710_000_000.0), ("old2.txt", 1_710_000_000.0)] {
+      try (root.appendingPathComponent(name) as NSURL).setResourceValue(Date(timeIntervalSince1970: seconds), forKey: .addedToDirectoryDateKey)
+    }
     let before = try DirectoryReader.read(root).entries
     let suite = "local.macexplorer.native-created-date." + UUID().uuidString
     let defaults = UserDefaults(suiteName: suite)!
@@ -71,7 +74,7 @@ enum NativeCreatedDateChecks {
     func check(_ condition: Bool, _ text: String) throws { guard condition else { throw failure(text) }; checks.append(text); print("PASS created-date: " + text) }
     func column(_ id: String) -> NSTableColumn { browser.table.tableColumns.first { $0.identifier.rawValue == id }! }
     try check(browser.sort == .modified && !browser.ascending, "Legacy modified-date default is preserved")
-    try check(browser.table.tableColumns.map { $0.identifier.rawValue } == ["name", "modified", "created", "kind", "size"], "Created-date column follows Modified without reordering the original columns")
+    try check(browser.table.tableColumns.map { $0.identifier.rawValue } == ["name", "modified", "created", "added", "kind", "size"], "Created-date column follows Modified without reordering the original columns")
     let formatter = DateFormatter(); formatter.dateFormat = "yyyy/M/d HH:mm"; formatter.locale = NativeLanguage.formatLocale
     for entry in browser.entries where !entry.isDirectory {
       let row = browser.entries.firstIndex(of: entry)!
@@ -137,6 +140,51 @@ enum NativeCreatedDateChecks {
     defaults.synchronize()
     try await verifyRelaunch(root: root, suite: suite, output: output)
     try check(true, "Fresh application process restores Created default and ascending folder override")
+    try check(browser.foldersFirst && column("added").isHidden, "Legacy settings keep folders first and Added hidden")
+    ExplorerMenu.present(browser.columnMenu(), below: browser.viewButton)
+    try clickMenu(NL("添加日期"), owner: window)
+    window.contentView?.layoutSubtreeIfNeeded()
+    try check(!column("added").isHidden && browser.detailColumns.visible.contains("added"), "Added date can be enabled from the real column menu")
+    for (row, entry) in browser.entries.enumerated() {
+      let cell = browser.tableView(browser.table, viewFor: column("added"), row: row) as? MetadataCell
+      try check(entry.added != nil && cell?.value.stringValue == entry.added.map(formatter.string), "Added cell displays system metadata: " + entry.name)
+    }
+    browser.executeAction("settings")
+    try await until { ExplorerDialogs.isPresenting(in: window) }
+    try choice(NL("默认排序")).performClick(nil); try clickMenu(NL("添加日期"), owner: window)
+    ExplorerDialogs.close(in: window)
+    ExplorerMenu.present(browser.sortMenu(), below: browser.sortButton)
+    try clickMenu(NL("添加日期"), owner: window)
+    browser.sortMenu().first { $0.title == NL("递减") }?.action?()
+    try await until { browser.sort == .added && browser.entries.map(\.name) == ["Folder", "new.txt", "old10.txt", "old2.txt"] }
+    ExplorerMenu.present(browser.sortMenu(), below: browser.sortButton)
+    try clickMenu(NL("文件夹优先"), owner: window)
+    let mixed = ["new.txt", "Folder", "old10.txt", "old2.txt"]
+    try await until { browser.entries.map(\.name) == mixed && second.entries.map(\.name) == mixed && !second.foldersFirst }
+    try check(browser.sortMenu().first { $0.title == NL("文件夹优先") }?.checked == false, "Mixed sorting and folder preference synchronize across windows")
+    browser.table.sortDescriptors = [NSSortDescriptor(key: "added", ascending: true)]
+    try await until { browser.entries.map(\.name) == ["old2.txt", "old10.txt", "Folder", "new.txt"] }
+    browser.table.sortDescriptors = [NSSortDescriptor(key: "added", ascending: false)]
+    try await until { browser.entries.map(\.name) == mixed }
+    browser.reload()
+    try await until { !browser.loading && browser.entries.map(\.name) == mixed }
+    try check(!browser.foldersFirst, "Mixed added-date sorting survives header direction changes and reload")
+    let incoming = root.appendingPathComponent("incoming.txt")
+    try Data("new arrival".utf8).write(to: incoming)
+    try fm.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_000_000_000)], ofItemAtPath: incoming.path)
+    try await until { browser.entries.count == 5 && browser.entries.first?.name == "incoming.txt" }
+    try check(browser.entries.first?.added != nil && browser.entries.dropFirst().map(\.name) == mixed, "Watcher puts a newly added file first despite its older modification date")
+    try fm.removeItem(at: incoming)
+    try await until { browser.entries.map(\.name) == mixed }
+    defaults.synchronize(); try await verifyRelaunch(root: root, suite: suite, output: output, added: true)
+    try check(true, "Added sort, visible column and disabled folders-first survive process restart")
+    try capture(window, at: output.appendingPathComponent("native-added-date-mixed.png"))
+    browser.viewMenu().first { $0.title == NL("应用到所有文件夹") }?.action?()
+    try await until { (defaults.dictionary(forKey: "folderViews") ?? [:]).isEmpty }
+    try check(defaults.dictionary(forKey: "defaultFolderView")?["foldersFirst"] as? Bool == false, "Apply to all folders saves disabled folders-first")
+    browser.sortMenu().first { $0.title == NL("文件夹优先") }?.action?()
+    browser.sortMenu().first { $0.title == NL("文件夹优先") }?.action?()
+    try check((defaults.dictionary(forKey: "folderViews") ?? [:]).isEmpty, "Returning to inherited sorting removes the folder override")
     defaults.removeObject(forKey: "folderViews")
     defaults.set(["view": "details", "sort": "future-sort", "ascending": true], forKey: "defaultFolderView")
     let fallback = BrowserController(initial: root, defaults: defaults); browsers.append(fallback)
@@ -146,8 +194,8 @@ enum NativeCreatedDateChecks {
     return checks
   }
 
-  private static func verifyRelaunch(root: URL, suite: String, output: URL) async throws {
-    let report = output.appendingPathComponent("created-date-relaunch.json")
+  private static func verifyRelaunch(root: URL, suite: String, output: URL, added: Bool = false) async throws {
+    let report = output.appendingPathComponent(added ? "added-date-relaunch.json" : "created-date-relaunch.json")
     let process = Process(); process.executableURL = Bundle.main.executableURL
     process.arguments = ["--smoke-test", root.path, "--report", report.path, "--created-date-settings", suite]
     let log = output.appendingPathComponent("created-date-relaunch.log")
@@ -170,6 +218,12 @@ enum NativeCreatedDateChecks {
     window.contentViewController = browser
     defer { browser.stopObserving() }
     try await until { !browser.loading && browser.entries.count == 4 }
+    if defaults.dictionary(forKey: "defaultFolderView")?["sort"] as? String == "added" {
+      guard browser.sort == .added, !browser.ascending, !browser.foldersFirst,
+        browser.detailColumns.visible.contains("added"), browser.table.sortDescriptors.first?.key == "added",
+        browser.entries.map(\.name) == ["new.txt", "Folder", "old10.txt", "old2.txt"] else { throw failure("Added-date preferences did not survive process relaunch") }
+      return ["Added-date column and mixed sorting restored in a fresh process"]
+    }
     guard defaults.dictionary(forKey: "defaultFolderView")?["sort"] as? String == "created", browser.sort == .created, browser.ascending,
       browser.table.sortDescriptors.first?.key == "created", browser.table.sortDescriptors.first?.ascending == true,
       browser.entries.map(\.name) == ["Folder", "old2.txt", "old10.txt", "new.txt"] else { throw failure("Creation-date preferences/order did not survive process relaunch") }

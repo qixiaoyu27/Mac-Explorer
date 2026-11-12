@@ -9,6 +9,7 @@ public enum DirectoryReader {
     .fileSizeKey,
     .contentModificationDateKey,
     .creationDateKey,
+    .addedToDirectoryDateKey,
     .isHiddenKey,
     .fileResourceIdentifierKey,
   ]
@@ -82,7 +83,8 @@ public enum DirectoryReader {
           modified: values.contentModificationDate,
           isHidden: (values.isHidden ?? false) || url.lastPathComponent.hasPrefix("."),
           created: values.creationDate,
-          resourceIdentifier: values.fileResourceIdentifier as? Data
+          resourceIdentifier: values.fileResourceIdentifier as? Data,
+          added: values.addedToDirectoryDate
         ))
       } catch {
         skippedCount += 1

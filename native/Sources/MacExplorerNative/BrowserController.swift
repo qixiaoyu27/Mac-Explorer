@@ -54,7 +54,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     get { Set(selectedEntries().map(\.id)) }
     set { selectionManager.replaceSelection(paths: newValue) }
   }
-  var showHidden = false, ascending = true, compact = false, extensions = true, navigationPane = true
+  var showHidden = false, ascending = true, foldersFirst = true, compact = false, extensions = true, navigationPane = true
   var checkboxes = false {
     didSet { if oldValue != checkboxes { updateNameHeader() } }
   }
@@ -411,7 +411,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
       ExplorerMenu.show(self.columnMenu(), at: window.convertPoint(toScreen: event.locationInWindow), owner: window)
     }
     table.headerView = header; table.allowsColumnReordering = true; table.allowsColumnResizing = true
-    for (id, title, width) in [("name", NL("名称"), 450.0), ("modified", NL("修改日期"), 165.0), ("created", NL("创建日期"), 165.0), ("kind", NL("类型"), 132.0), ("size", NL("大小"), 100.0)] {
+    for (id, title, width) in [("name", NL("名称"), 450.0), ("modified", NL("修改日期"), 165.0), ("created", NL("创建日期"), 165.0), ("added", NL("添加日期"), 165.0), ("kind", NL("类型"), 132.0), ("size", NL("大小"), 100.0)] {
       let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
       let headerCell = ExplorerHeaderCell(textCell: title)
       headerCell.alignment = id == "size" ? .right : .left
@@ -539,7 +539,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     let insets = FilePaneSurface.detailsInsets
     let available = max(0, fileScroll.contentSize.width - insets.left - insets.right)
     let dateWidth: CGFloat = width <= 900 ? 150 : width <= 1100 ? 153 : 165
-    let metadata: [String: CGFloat] = ["modified": dateWidth, "created": dateWidth, "kind": width <= 1100 ? 110 : 132, "size": width <= 900 ? 80 : width <= 1100 ? 85 : 100]
+    let metadata: [String: CGFloat] = ["modified": dateWidth, "created": dateWidth, "added": dateWidth, "kind": width <= 1100 ? 110 : 132, "size": width <= 900 ? 80 : width <= 1100 ? 85 : 100]
     let used = metadata.filter { detailColumns.visible.contains($0.key) }.values.reduce(0, +)
     syncingColumns = true
     for (index, id) in detailColumns.order.enumerated() {
@@ -942,11 +942,11 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     guard !stopped, refreshPending, directory.isFileURL, !searchActive else { return }
     if automaticRefreshBlocked || automaticRead != nil { scheduleAutomaticRefresh(); return }
     refreshPending = false
-    let target = directory, navigation = generation, queryToken = queryGeneration, order = sort, direction = ascending, hidden = showHidden, query = search.stringValue
+    let target = directory, navigation = generation, queryToken = queryGeneration, order = sort, direction = ascending, foldersFirst = foldersFirst, hidden = showHidden, query = search.stringValue
     let task = Task.detached(priority: .utility) {
       let snapshot = try DirectoryReader.read(target)
       try Task.checkCancellation()
-      return (snapshot, EntryQuery.apply(snapshot.entries, showHidden: hidden, query: query, sort: order, ascending: direction))
+      return (snapshot, EntryQuery.apply(snapshot.entries, showHidden: hidden, query: query, sort: order, ascending: direction, foldersFirst: foldersFirst))
     }
     automaticRead = task
     Task { @MainActor [weak self] in
@@ -1004,8 +1004,8 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
         $0.isDirectory && !$0.isPackage && (showHidden || !$0.isHidden)
       })
     }
-    let token = queryGeneration, navigation = generation, hidden = showHidden, query = searchActive ? "" : search.stringValue, order = sort, direction = ascending
-    let task = Task.detached(priority: .userInitiated) { EntryQuery.apply(snapshot.entries, showHidden: hidden, query: query, sort: order, ascending: direction) }; queryTask = task
+    let token = queryGeneration, navigation = generation, hidden = showHidden, query = searchActive ? "" : search.stringValue, order = sort, direction = ascending, foldersFirst = foldersFirst
+    let task = Task.detached(priority: .userInitiated) { EntryQuery.apply(snapshot.entries, showHidden: hidden, query: query, sort: order, ascending: direction, foldersFirst: foldersFirst) }; queryTask = task
     Task { @MainActor [weak self] in
       let result = await task.value; guard let self, self.queryGeneration == token, self.generation == navigation else { return }
       self.entries = result.map { entry in var value = entry; value.vcsMark = self.vcsStatus?.statesByPath[entry.id]?.mark; return value }; self.loading = false; self.displayedMilliseconds = Date().timeIntervalSince(self.startedAt) * 1000; self.render(); self.restoreLocationState()
@@ -1123,8 +1123,8 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
       if detailColumns == (DetailColumns(propertyList: global["columns"]) ?? DetailColumns()) { current.removeValue(forKey: "columns") }
       else { current["columns"] = detailColumns.propertyList }
     } else if group == "sort" {
-      if sort.rawValue == (global["sort"] as? String ?? "name") && ascending == (global["ascending"] as? Bool ?? true) { current.removeValue(forKey: "sort"); current.removeValue(forKey: "ascending") }
-      else { current["sort"] = sort.rawValue; current["ascending"] = ascending }
+      if sort.rawValue == (global["sort"] as? String ?? "name") && ascending == (global["ascending"] as? Bool ?? true) && foldersFirst == (global["foldersFirst"] as? Bool ?? true) { current.removeValue(forKey: "sort"); current.removeValue(forKey: "ascending"); current.removeValue(forKey: "foldersFirst") }
+      else { current["sort"] = sort.rawValue; current["ascending"] = ascending; current["foldersFirst"] = foldersFirst }
     } else {
       if mode.rawValue == (global["view"] as? String ?? "icons") && Int(iconSize) == (global["iconSize"] as? Int ?? 64) { current.removeValue(forKey: "view"); current.removeValue(forKey: "iconSize") }
       else { current["view"] = mode.rawValue; current["iconSize"] = Int(iconSize) }
@@ -1155,9 +1155,9 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     let global = defaults.dictionary(forKey: "defaultFolderView") ?? [:], saved = savedFolderViews[key] ?? [:]
     mode = ExplorerLayoutMode(rawValue: global["view"] as? String ?? "icons") ?? .icons
     iconSize = CGFloat((32...128).contains(global["iconSize"] as? Int ?? 64) ? global["iconSize"] as? Int ?? 64 : 64)
-    sort = EntrySort(rawValue: global["sort"] as? String ?? "name") ?? .name; ascending = global["ascending"] as? Bool ?? true
+    sort = EntrySort(rawValue: global["sort"] as? String ?? "name") ?? .name; ascending = global["ascending"] as? Bool ?? true; foldersFirst = global["foldersFirst"] as? Bool ?? true
     if let view = saved["view"] as? String, let layout = ExplorerLayoutMode(rawValue: view), let size = saved["iconSize"] as? Int, (32...128).contains(size) { mode = layout; iconSize = CGFloat(size) }
-    if let order = saved["sort"] as? String, let key = EntrySort(rawValue: order), let direction = saved["ascending"] as? Bool { sort = key; ascending = direction }
+    if let order = saved["sort"] as? String, let key = EntrySort(rawValue: order), let direction = saved["ascending"] as? Bool { sort = key; ascending = direction; foldersFirst = saved["foldersFirst"] as? Bool ?? foldersFirst }
     groupMode = EntryGroupMode(rawValue: saved["groupBy"] as? String ?? global["groupBy"] as? String ?? "none") ?? .none
     groupNewestFirst = saved["groupNewestFirst"] as? Bool ?? global["groupNewestFirst"] as? Bool ?? true
     groupFoldersFirst = saved["groupFoldersFirst"] as? Bool ?? global["groupFoldersFirst"] as? Bool ?? true
@@ -1387,7 +1387,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     }
     let cell = (table.makeView(withIdentifier: id, owner: self) as? MetadataCell) ?? MetadataCell(); cell.identifier = id; cell.value.font = ExplorerTypography.font()
     cell.value.alignment = tableColumn.headerCell.alignment
-    switch id.rawValue { case "modified": cell.value.stringValue = entry.modified.map(dateFormatter.string) ?? ""; case "created": cell.value.stringValue = entry.created.map(dateFormatter.string) ?? ""; case "size": cell.value.stringValue = entry.isDirectory ? "" : ExplorerFormat.size(entry.size); default: cell.value.stringValue = entry.kind }; return cell
+    switch id.rawValue { case "modified": cell.value.stringValue = entry.modified.map(dateFormatter.string) ?? ""; case "created": cell.value.stringValue = entry.created.map(dateFormatter.string) ?? ""; case "added": cell.value.stringValue = entry.added.map(dateFormatter.string) ?? "—"; case "size": cell.value.stringValue = entry.isDirectory ? "" : ExplorerFormat.size(entry.size); default: cell.value.stringValue = entry.kind }; return cell
   }
   func tableViewSelectionDidChange(_ notification: Notification) {
     guard !syncingSelection, mode == .details else { return }
@@ -1549,12 +1549,13 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   }
 
   func sortMenu() -> [ExplorerMenuItem] {
-    var items = [(NL("名称"), EntrySort.name), (NL("修改日期"), .modified), (NL("创建日期"), .created), (NL("类型"), .kind), (NL("大小"), .size)].map { name, key in ExplorerMenuItem(title: name, checked: sort == key, action: { [weak self] in self?.sort = key; self?.saveView(group: "sort"); self?.recompute() }) }
+    var items = [(NL("名称"), EntrySort.name), (NL("修改日期"), .modified), (NL("创建日期"), .created), (NL("添加日期"), .added), (NL("类型"), .kind), (NL("大小"), .size)].map { name, key in ExplorerMenuItem(title: name, checked: sort == key, action: { [weak self] in self?.sort = key; self?.saveView(group: "sort"); self?.recompute() }) }
     items += [ExplorerMenuItem(title: NL("递增"), checked: ascending, divider: true, action: { [weak self] in self?.ascending = true; self?.saveView(group: "sort"); self?.recompute() }), ExplorerMenuItem(title: NL("递减"), checked: !ascending, action: { [weak self] in self?.ascending = false; self?.saveView(group: "sort"); self?.recompute() })]
+    items.append(ExplorerMenuItem(title: NL("文件夹优先"), checked: foldersFirst, divider: true, action: { [weak self] in self?.foldersFirst.toggle(); self?.saveView(group: "sort"); self?.recompute() }))
     return items
   }
   func columnMenu() -> [ExplorerMenuItem] {
-    let titles = ["name": NL("名称"), "modified": NL("修改日期"), "created": NL("创建日期"), "kind": NL("类型"), "size": NL("大小")]
+    let titles = ["name": NL("名称"), "modified": NL("修改日期"), "created": NL("创建日期"), "added": NL("添加日期"), "kind": NL("类型"), "size": NL("大小")]
     return detailColumns.order.map { id in
       ExplorerMenuItem(title: titles[id]!, checked: detailColumns.visible.contains(id), enabled: id != "name", action: { [weak self] in
         guard let self, id != "name" else { return }; self.captureColumnWidths()
@@ -1590,7 +1591,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
       ExplorerMenuItem(title: NL("项目复选框"), icon: "check", checked: checkboxes, divider: true, action: { [weak self] in guard let self else { return }; self.checkboxes.toggle(); self.defaults.set(self.checkboxes, forKey: "checkboxes"); self.render() }),
       ExplorerMenuItem(title: NL("文件扩展名"), icon: "document", checked: extensions, action: { [weak self] in guard let self else { return }; self.extensions.toggle(); self.defaults.set(self.extensions, forKey: "extensions"); self.render() }),
       ExplorerMenuItem(title: NL("隐藏的项目"), icon: "eye", checked: showHidden, action: { [weak self] in self?.toggleHidden() }),
-    ]), ExplorerMenuItem(title: NL("分组依据"), children: groupingMenu()), ExplorerMenuItem(title: NL("应用到所有文件夹"), divider: true, action: { [weak self] in guard let self else { return }; self.defaults.set(["view": self.mode.rawValue, "iconSize": Int(self.iconSize), "sort": self.sort.rawValue, "ascending": self.ascending, "columns": self.detailColumns.propertyList, "groupBy": self.groupMode.rawValue, "groupNewestFirst": self.groupNewestFirst, "groupFoldersFirst": self.groupFoldersFirst], forKey: "defaultFolderView"); self.savedFolderViews = [:]; self.defaults.set([String: [String: Any]](), forKey: "folderViews") })]; return items
+    ]), ExplorerMenuItem(title: NL("分组依据"), children: groupingMenu()), ExplorerMenuItem(title: NL("应用到所有文件夹"), divider: true, action: { [weak self] in guard let self else { return }; self.defaults.set(["view": self.mode.rawValue, "iconSize": Int(self.iconSize), "sort": self.sort.rawValue, "ascending": self.ascending, "foldersFirst": self.foldersFirst, "columns": self.detailColumns.propertyList, "groupBy": self.groupMode.rawValue, "groupNewestFirst": self.groupNewestFirst, "groupFoldersFirst": self.groupFoldersFirst], forKey: "defaultFolderView"); self.savedFolderViews = [:]; self.defaults.set([String: [String: Any]](), forKey: "folderViews") })]; return items
   }
   private func newMenu() -> [ExplorerMenuItem] {
     [(NL("文件夹"), "folder"), (NL("文本文档"), "txt"), (NL("Word 文档"), "docx"), (NL("Excel 工作簿"), "xlsx"), (NL("PowerPoint 演示文稿"), "pptx")].map { name, kind in

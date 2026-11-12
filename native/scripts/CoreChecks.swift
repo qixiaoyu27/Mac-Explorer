@@ -23,6 +23,8 @@ struct CoreValidation {
       try manager.createSymbolicLink(at: root.appendingPathComponent(name), withDestinationURL: target)
     }
     try manager.createSymbolicLink(atPath: root.appendingPathComponent("relative-link").path, withDestinationPath: "folder")
+    let added = Date(timeIntervalSince1970: 1_710_000_000)
+    try (file as NSURL).setResourceValue(added, forKey: .addedToDirectoryDateKey)
     let beforePaths = try manager.subpathsOfDirectory(atPath: root.path).sorted()
     let beforeAttributes = try manager.attributesOfItem(atPath: file.path)
     let beforeLinks = try ["file-link", "folder-link", "package-link", "broken-link", "relative-link"].map {
@@ -41,6 +43,8 @@ struct CoreValidation {
     try check(snapshot.elapsedMilliseconds >= 0 && snapshot.elapsedMilliseconds.isFinite, "Elapsed timing")
     try check(entries["notes.txt"]?.size == Int64(payload.count), "File size")
     try check(entries["notes.txt"]?.modified == modified, "Modification date")
+    try check(entries["notes.txt"]?.added == added, "Directory read uses the system added date independently of modification date")
+    try check(try FileSearch.search(in: root, query: "notes", showHidden: false).entries.first?.added == added, "Search preserves added dates")
     try check(entries["notes.txt"]?.kind == "文本文档", "File kind")
     try check(entries["folder"]?.kind == "文件夹", "Directory kind")
     try check(entries["folder"]?.size == 0, "Directory size")
@@ -65,14 +69,14 @@ struct CoreValidation {
       do { _ = try DirectoryReader.read(url) } catch { rejected = true }
       try check(rejected, "Invalid input rejected: \(url)")
     }
-    func entry(_ name: String, folder: Bool = false, size: Int64 = 0, modified: Double? = nil, created: Double? = nil,
+    func entry(_ name: String, folder: Bool = false, size: Int64 = 0, modified: Double? = nil, created: Double? = nil, added: Double? = nil,
       hidden: Bool = false, path: String? = nil) -> FileEntry {
       FileEntry(url: root.appendingPathComponent(path ?? name), name: name, isDirectory: folder,
         isSymbolicLink: false, isPackage: false, size: size,
-        modified: modified.map { Date(timeIntervalSince1970: $0) }, isHidden: hidden, created: created.map { Date(timeIntervalSince1970: $0) })
+        modified: modified.map { Date(timeIntervalSince1970: $0) }, isHidden: hidden, created: created.map { Date(timeIntervalSince1970: $0) }, added: added.map { Date(timeIntervalSince1970: $0) })
     }
-    func names(_ entries: [FileEntry], sort: EntrySort = .name, ascending: Bool = true) -> [String] {
-      EntryQuery.apply(entries, showHidden: true, query: "", sort: sort, ascending: ascending).map(\.name)
+    func names(_ entries: [FileEntry], sort: EntrySort = .name, ascending: Bool = true, foldersFirst: Bool = true) -> [String] {
+      EntryQuery.apply(entries, showHidden: true, query: "", sort: sort, ascending: ascending, foldersFirst: foldersFirst).map(\.name)
     }
     let sortEntries = [entry("file10"), entry("folder10", folder: true), entry("file2"), entry("folder2", folder: true)]
     try check(names(sortEntries) == ["folder2", "folder10", "file2", "file10"], "Natural ascending folders first")
@@ -97,6 +101,13 @@ struct CoreValidation {
     for ascending in [true, false] {
       try check(names(creationFolders, sort: .created, ascending: ascending) == ["folder", "file"], "Created sort keeps folders first with different dates")
     }
+    let addedDates = [entry("new", modified: -100, created: -100, added: 200), entry("unknown", modified: 999, created: 999),
+      entry("old10", added: 100), entry("old2", added: 100), entry("folder", folder: true, added: 150)]
+    try check(names(addedDates, sort: .added, ascending: false) == ["folder", "new", "old10", "old2", "unknown"], "Added sort preserves folders-first default and does not substitute missing dates")
+    try check(names(addedDates, sort: .added, ascending: false, foldersFirst: false) == ["new", "folder", "old10", "old2", "unknown"], "Mixed added-date descending and natural ties")
+    try check(names(addedDates, sort: .added, foldersFirst: false) == ["unknown", "old2", "old10", "folder", "new"], "Mixed added-date ascending")
+    try check(names(creationFolders, sort: .created, foldersFirst: false) == ["file", "folder"], "Folders-first can be disabled for creation dates")
+    try check(names(sortEntries, foldersFirst: false) == ["file2", "file10", "folder2", "folder10"], "Folders-first can be disabled for names")
     let sameNames = [entry("same", created: 1, path: "b/same"), entry("same", created: 1, path: "a/same")]
     for ascending in [true, false] {
       let result = EntryQuery.apply(sameNames, showHidden: true, query: "", sort: .created, ascending: ascending)

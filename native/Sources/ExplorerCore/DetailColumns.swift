@@ -2,10 +2,10 @@ import Foundation
 import CoreFoundation
 
 public struct DetailColumns: Equatable, Sendable {
-  public static let identifiers = ["name", "modified", "created", "kind", "size"]
-  public static let defaultWidths: [String: Double] = ["name": 450, "modified": 165, "created": 165, "kind": 132, "size": 100]
+  public static let identifiers = ["name", "modified", "created", "added", "kind", "size"]
+  public static let defaultWidths: [String: Double] = ["name": 450, "modified": 165, "created": 165, "added": 165, "kind": 132, "size": 100]
   public var order = identifiers
-  public var visible = Set(identifiers)
+  public var visible = Set(identifiers).subtracting(["added"])
   public var widths = defaultWidths
   public var automatic = true
   public init() {}

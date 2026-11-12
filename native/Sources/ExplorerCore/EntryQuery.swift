@@ -4,6 +4,7 @@ public enum EntrySort: String, CaseIterable, Sendable {
   case name
   case modified
   case created
+  case added
   case size
   case kind
 }
@@ -14,7 +15,8 @@ public enum EntryQuery {
     showHidden: Bool,
     query: String,
     sort: EntrySort,
-    ascending: Bool
+    ascending: Bool,
+    foldersFirst: Bool = true
   ) -> [FileEntry] {
     let locale = NativeLanguage.formatLocale
     let textOptions: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
@@ -24,15 +26,15 @@ public enum EntryQuery {
       (showHidden || !entry.isHidden)
         && (query.isEmpty || entry.name.range(of: query, options: textOptions, locale: locale) != nil)
     }.sorted { left, right in
-      if left.isDirectory != right.isDirectory { return left.isDirectory }
+      if foldersFirst && left.isDirectory != right.isDirectory { return left.isDirectory }
 
       var order: ComparisonResult
       switch sort {
       case .name:
         order = left.name.compare(right.name, options: nameOptions, locale: locale)
-      case .modified, .created:
-        let leftDate = sort == .created ? left.created : left.modified
-        let rightDate = sort == .created ? right.created : right.modified
+      case .modified, .created, .added:
+        let leftDate = sort == .added ? left.added : sort == .created ? left.created : left.modified
+        let rightDate = sort == .added ? right.added : sort == .created ? right.created : right.modified
         switch (leftDate, rightDate) {
         case let (leftDate?, rightDate?): order = compare(leftDate, rightDate)
         case (nil, .some): order = .orderedAscending

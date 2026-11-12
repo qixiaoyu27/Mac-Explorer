@@ -1254,7 +1254,7 @@ final class EDSettingsBody: EDView {
       let layout = EDChoiceRow(title: NL("默认布局"), options: layouts, value: selectedLayout) { [weak self] value in
         guard let self else { return }; let parts = value.split(separator: ":"); self.folderDefaults["view"] = String(parts[0]); if parts.count == 2 { self.folderDefaults["iconSize"] = String(parts[1]) }; self.onFolderDefaults?(self.folderDefaults)
       }
-      let sort = EDChoiceRow(title: NL("默认排序"), options: [(NL("名称"), "name"), (NL("修改日期"), "modified"), (NL("创建日期"), "created"), (NL("类型"), "kind"), (NL("大小"), "size")], value: folderDefaults["sort"] ?? "name") { [weak self] value in guard let self else { return }; self.folderDefaults["sort"] = value; self.onFolderDefaults?(self.folderDefaults) }
+      let sort = EDChoiceRow(title: NL("默认排序"), options: [(NL("名称"), "name"), (NL("修改日期"), "modified"), (NL("创建日期"), "created"), (NL("添加日期"), "added"), (NL("类型"), "kind"), (NL("大小"), "size")], value: folderDefaults["sort"] ?? "name") { [weak self] value in guard let self else { return }; self.folderDefaults["sort"] = value; self.onFolderDefaults?(self.folderDefaults) }
       let direction = EDChoiceRow(title: NL("排序方向"), options: [(NL("递增"), "true"), (NL("递减"), "false")], value: folderDefaults["ascending"] ?? "true") { [weak self] value in guard let self else { return }; self.folderDefaults["ascending"] = value; self.onFolderDefaults?(self.folderDefaults) }
       let reset = EDButton(title: NL("重置所有文件夹"), style: .secondary); reset.onPress = { [weak self] in self?.onResetFolders?() }
       [layout, sort, direction, reset].forEach(group.content.addSubview)
