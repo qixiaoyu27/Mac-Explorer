@@ -486,6 +486,7 @@ enum NativeSelectionChecks {
     }
     browser.selectedPaths = []
     let tableOrigin = browser.fileScroll.contentView.bounds.origin
+    let firstFile = browser.entries.first?.id
     mouseDown(at: detailsStart, in: table)
     NSApp.sendEvent(event(.leftMouseDragged, at: detailsEnd, in: table))
     NSApp.sendEvent(event(.leftMouseUp, at: detailsEnd, in: table))
@@ -494,6 +495,11 @@ enum NativeSelectionChecks {
     }
     guard browser.fileScroll.contentView.bounds.origin == tableOrigin else {
       throw NativeSmoke.Failure(description: "Details marquee away from viewport edges keeps the scroll origin")
+    }
+    let firstRow = table.rowView(atRow: 0, makeIfNecessary: false)
+    guard browser.entries.first?.id == firstFile, firstRow?.isHidden == false,
+          pane.fileViewport.contains(pane.convert(table.rect(ofRow: 0), from: table)) else {
+      throw NativeSmoke.Failure(description: "Issue #36: blank-area marquee keeps the first file and its row fully visible")
     }
     func selectionPixels(_ row: Int) throws -> (top: NSColor, bottom: NSColor, fill: NSColor) {
       guard let view = table.rowView(atRow: row, makeIfNecessary: false) as? FileRowView else {
@@ -570,7 +576,8 @@ enum NativeSelectionChecks {
       throw NativeSmoke.Failure(description: "Switching back to Details restores its scroll origin and shared selection")
     }
     browser.content.scrollTo(tableOrigin)
-    return ["List and Details keep one scroll view and clip while switching their layout and header",
+    return ["Issue #36: blank-area marquee keeps the first file and its row fully visible",
+            "List and Details keep one scroll view and clip while switching their layout and header",
             "Switching layouts restores List and Details scrolling and keeps the shared selection",
             "List reserves the measured left gutter and fits the first column's names",
             "List side-lane drags draw a visible box without hitting files",

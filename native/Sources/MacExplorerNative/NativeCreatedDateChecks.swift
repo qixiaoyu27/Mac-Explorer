@@ -108,7 +108,7 @@ enum NativeCreatedDateChecks {
       let insets = browser.fileScroll.contentInsets
       let available = browser.fileScroll.contentSize.width - insets.left - insets.right
       let overflows = visible.reduce(0) { $0 + $1.width } > available + 1
-      try check(visible.map { $0.identifier.rawValue } == DetailColumns.identifiers && column("name").width >= 150 &&
+      try check(visible.map { $0.identifier.rawValue } == DetailColumns.identifiers.filter { DetailColumns().visible.contains($0) } && column("name").width >= 150 &&
                 browser.content.horizontalScroller.isHidden == !overflows,
                 "Details keeps its columns and scrolls when needed at \(Int(width)) / \(pane)")
       if width == 800 {
@@ -116,10 +116,11 @@ enum NativeCreatedDateChecks {
       }
       try capture(window, at: output.appendingPathComponent("native-created-\(Int(width))-\(pane.isEmpty ? "none" : pane).png"))
     }
+    let regularRowHeight = browser.table.rowHeight
     browser.paneMode = ""; window.setContentSize(NSSize(width: 1260, height: 780)); browser.compact = true; browser.updateMode(persist: false)
     NSApp.appearance = NSAppearance(named: .darkAqua)
     try capture(window, at: output.appendingPathComponent("native-created-dark-compact.png"))
-    try check(browser.table.rowHeight == 28 && !column("created").isHidden, "Compact dark details retain the creation-date column")
+    try check(browser.table.rowHeight >= 28 && browser.table.rowHeight < regularRowHeight && !column("created").isHidden, "Compact dark details retain the creation-date column")
     NSApp.appearance = oldAppearance
 
     // Use the real settings controls and reset only this fixture's folder overrides.

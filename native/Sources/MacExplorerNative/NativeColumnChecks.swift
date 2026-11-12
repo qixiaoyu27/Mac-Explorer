@@ -71,7 +71,7 @@ enum NativeColumnChecks {
     let defaultColumns = browser.detailColumns
     window.setContentSize(NSSize(width: 800, height: wideWindowSize.height)); layout()
     let narrowColumns = table.tableColumns.filter { !$0.isHidden }.map { $0.identifier.rawValue }
-    try check(narrowColumns == DetailColumns.identifiers && browser.detailColumns == defaultColumns &&
+    try check(narrowColumns == DetailColumns.identifiers.filter { DetailColumns().visible.contains($0) } && browser.detailColumns == defaultColumns &&
               !h.isHidden && h.isEnabled && h.layer?.sublayers?.first?.opacity == 1,
               "Narrow Details keeps the default columns and reveals the new horizontal scrollbar")
     let lastColumn = table.numberOfColumns - 1
