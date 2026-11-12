@@ -643,6 +643,18 @@ enum NativeSelectionChecks {
     state.apply(.set(grouped[3], false), topology: groups)
     state.apply(.set(.group("B"), true), topology: groups)
     try check(state.contains(grouped[3]) && state.marks[grouped[3]] == nil, "Selecting a group clears its member exceptions")
+    let original = FileSelectionNode.item("original", group: "files", identity: Data([1]))
+    let incoming = FileSelectionNode.item("incoming", group: "files", identity: Data([2]))
+    let replacement = FileSelectionNode.item("original", group: "files", identity: Data([3]))
+    let before = FileSelectionTopology(rows: [.group("files"), original])
+    let after = FileSelectionTopology(rows: [.group("files"), original, incoming])
+    for mark in [FileSelectionNode.root, .group("files")] {
+      var inherited = SelectionState(); inherited.set(mark, selected: true)
+      inherited.reconcile(with: after, previous: before)
+      try check(inherited.contains(original) && !inherited.contains(incoming), "Refresh preserves inherited selection without selecting a newly added file")
+      inherited.reconcile(with: FileSelectionTopology(rows: [.group("files"), replacement, incoming]), previous: after)
+      try check(!inherited.contains(replacement), "Same-path replacements cannot inherit Select All or group selection")
+    }
     let previous = NSApp.keyWindow
     let window = NSWindow(contentRect: NSRect(x: 50, y: 50, width: 460, height: 320), styleMask: [.titled, .closable], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false

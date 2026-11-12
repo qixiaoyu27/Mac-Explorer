@@ -201,6 +201,12 @@ struct SelectionState: Equatable {
       else if nodes.count == 1 { result[nodes[0]] = mark }
     }
     itemStates = result
+    if let previous {
+      // Inherited selection must not include new or replaced files after a refresh.
+      for node in topology.items where node.path != nil && itemStates[node] == nil && contains(node) {
+        if previous.matchingItems(node, previous: topology).isEmpty { set(node, selected: false) }
+      }
+    }
     if case let .item(anchor) = rangeAnchor {
       if let visible = topology.visibleNode(anchor, previous: previous) { rangeAnchor = .item(visible) }
       else if topology.matchingItems(anchor, previous: previous).isEmpty { rangeAnchor = .removed(anchor) }

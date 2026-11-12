@@ -137,7 +137,11 @@ enum NativeNavigationStateChecks {
     try check(expandedNames().isEmpty, "Deselecting a long folder name removes its expanded label without another layout pass")
     browser.selectedPaths = [inbox.path]; browser.collection.layoutSubtreeIfNeeded()
     if showsWindows {
+      if #available(macOS 14, *) { NSApp.activate() }
+      else { NSApp.activate(ignoringOtherApps: true) }
+      try await NativeSmoke.until { NSApp.isActive }
       window.makeKeyAndOrderFront(nil)
+      try await NativeSmoke.until { window.isKeyWindow }
       let cell = frame(0)
       let point = browser.collection.convert(NSPoint(x: cell.midX, y: cell.midY), to: nil)
       for type: NSEvent.EventType in [.leftMouseDown, .leftMouseUp] {
@@ -149,6 +153,7 @@ enum NativeNavigationStateChecks {
     } else {
       browser.openSelected()
     }
+    try check(browser.directory.path == inbox.path, "Double-click opens the selected folder before checking its expanded label")
     try check(expandedNames().isEmpty, "Opening a selected folder clears its expanded label before the destination loads")
     try check(browser.loading && browser.loadingView.isHidden && browser.emptyLabel.isHidden,
               "Opening a local folder does not immediately flash a loading placeholder or empty state")
