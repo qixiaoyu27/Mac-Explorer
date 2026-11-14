@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
 """Exercise navigation, grouping, rename and preferences without displaying windows."""
+import argparse
 import json
 import pathlib
 import subprocess
 import tempfile
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--skip-build", action="store_true", help="Reuse existing Swift build products")
+args = parser.parse_args()
 root = pathlib.Path(__file__).resolve().parents[1]
-subprocess.run(["swift", "build", "--package-path", str(root), "-c", "release"], check=True)
-build = pathlib.Path(subprocess.check_output(["swift", "build", "--package-path", str(root), "-c", "release", "--show-bin-path"], text=True).strip())
+build_command = ["swift", "build", "--package-path", str(root), "-c", "release"]
+# The harness links individual SwiftPM objects and uses the native engine's module layout.
+build_help = subprocess.check_output(["swift", "build", "--help"], text=True)
+if "--build-system" in build_help:
+    build_command += ["--build-system", "native"]
+if not args.skip_build:
+    subprocess.run(build_command, check=True)
+build = pathlib.Path(subprocess.check_output(build_command + ["--show-bin-path"], text=True).strip())
 output = root / "output" / "navigation-ui-checks"
 output.mkdir(parents=True, exist_ok=True)
 report = output / "report.json"

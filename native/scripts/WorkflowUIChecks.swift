@@ -31,6 +31,17 @@ enum NativeWorkflowChecks {
       window.contentView?.layoutSubtreeIfNeeded(); browser.collection.layoutSubtreeIfNeeded()
     }
     func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+    func checkSelectionAlignment(_ field: NSTextField, _ editor: NSTextView, context: String) throws {
+      guard let layout = editor.layoutManager, let container = editor.textContainer else {
+        throw NativeSmoke.Failure(description: "\(context): missing text layout")
+      }
+      layout.ensureLayout(for: container)
+      let glyphs = layout.glyphRange(forCharacterRange: editor.selectedRange(), actualCharacterRange: nil)
+      let line = layout.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+        .offsetBy(dx: editor.textContainerOrigin.x, dy: editor.textContainerOrigin.y)
+      let fieldLine = field.convert(line, from: editor)
+      try check(abs(fieldLine.midY - field.bounds.midY) <= 1, "\(context): selection is vertically centered (line: \(fieldLine), field: \(field.bounds))")
+    }
     try await until { !browser.loading && browser.entries.count == 91 }
     try check(browser.groupMode == .none && browser.displayRows.count == browser.entries.count, "Grouping starts disabled")
     try check(browser.viewMenu().contains { $0.title == NL("分组依据") } && !browser.sortMenu().contains { $0.title == NL("分组依据") }, "Grouping is offered in View")
@@ -156,9 +167,9 @@ enum NativeWorkflowChecks {
       let fileView = browser.fileScroll.documentView
       var renamed = false, opened = false
       let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!
-      let open = browser.selectionManager.openSelection
-      browser.selectionManager.openSelection = { opened = true }
-      defer { browser.selectionManager.openSelection = open }
+      let open = browser.itemActionsManager.openSelection
+      browser.itemActionsManager.openSelection = { opened = true }
+      defer { browser.itemActionsManager.openSelection = open }
       if let table = fileView as? FileTableView { let rename = table.renameSelection; table.renameSelection = { renamed = true }; table.keyDown(with: key); table.renameSelection = rename }
       if let collection = fileView as? FileCollectionView { let rename = collection.renameSelection; collection.renameSelection = { renamed = true }; collection.keyDown(with: key); collection.renameSelection = rename }
       try check(renamed && !opened, "Return retains the existing rename action")
@@ -201,6 +212,7 @@ enum NativeWorkflowChecks {
       guard let editor = field.currentEditor() as? NSTextView else { throw NativeSmoke.Failure(description: "Missing filename editor") }
       let stem = (name as NSString).deletingPathExtension
       try check(editor.selectedRange() == NSRange(location: 0, length: (stem as NSString).length), "Inline rename selects the filename stem and preserves the extension")
+      try checkSelectionAlignment(field, editor, context: "Icon rename")
       try check(!browser.collection.subviews.contains { $0 is NativeExpandedNameView }, "Inline rename removes expanded text")
       _ = browser.control(field, textView: editor, doCommandBy: #selector(NSResponder.cancelOperation(_:)))
       browser.collection.layoutSubtreeIfNeeded()
@@ -209,9 +221,47 @@ enum NativeWorkflowChecks {
     browser.collection.deselectAll(nil); browser.collection.layoutSubtreeIfNeeded()
     try check(!browser.collection.subviews.contains { $0 is NativeExpandedNameView }, "Deselecting collapses the complete filename")
     browser.closeTab(); try await until { !browser.loading && browser.directory.path == root.path }
+    browser.setGrouping(.none)
+    browser.setView(.details)
+    let detailEntry = browser.entries.first { !$0.isDirectory }!
+    browser.selectedPaths = [detailEntry.id]
+    browser.executeAction("rename")
+    let detailRow = browser.displayRows.firstIndex { $0.entry.map { browser.entries[$0].id == detailEntry.id } == true }!
+    guard let cell = browser.table.view(atColumn: nameColumn, row: detailRow, makeIfNecessary: false) as? NameCell,
+          let detailEditor = cell.nameLabel.currentEditor() as? NSTextView else {
+      throw NativeSmoke.Failure(description: "Missing Details rename editor")
+    }
+    try checkSelectionAlignment(cell.nameLabel, detailEditor, context: "Details rename")
+    let leading = cell.convert(detailEditor.bounds, from: detailEditor).minX
+    try check(abs(leading - (cell.icon.frame.maxX + 9)) < 0.5, "Details rename preserves the filename leading edge")
+    _ = browser.control(cell.nameLabel, textView: detailEditor, doCommandBy: #selector(NSResponder.cancelOperation(_:)))
     let sources = Array(browser.entries.filter { !$0.isDirectory }.prefix(2)).map(\.url)
     let form = EDBatchRenameForm(sources: sources)
     form.frame = NSRect(x: 0, y: 0, width: 720, height: 700)
+    let inputHost = NSView(frame: NSRect(x: 0, y: 0, width: 720, height: 700))
+    inputHost.addSubview(form)
+    let inputWindow = NSWindow(contentRect: inputHost.bounds, styleMask: [.titled], backing: .buffered, defer: false)
+    inputWindow.isReleasedWhenClosed = false
+    inputWindow.contentView = inputHost
+    defer { inputWindow.close() }
+    form.layoutSubtreeIfNeeded()
+    form.sourceName.selectText(nil)
+    guard let ruleEditor = form.sourceName.currentEditor() as? NSTextView else { throw NativeSmoke.Failure(description: "Missing batch rename editor") }
+    try checkSelectionAlignment(form.sourceName, ruleEditor, context: "Batch rename")
+    inputWindow.makeFirstResponder(nil)
+    for size in [10, 13, 24] {
+      ExplorerTypography.baseSize = CGFloat(size)
+      let identity = EDPropertyIdentity(title: "工作区 workspace", icon: nil, editable: true)
+      identity.frame = NSRect(x: 0, y: 0, width: 400, height: 61)
+      inputHost.addSubview(identity)
+      identity.layoutSubtreeIfNeeded()
+      identity.name.selectText(nil)
+      guard let editor = identity.name.currentEditor() as? NSTextView else { throw NativeSmoke.Failure(description: "Missing properties name editor") }
+      try checkSelectionAlignment(identity.name, editor, context: "Properties name at \(size) pt")
+      inputWindow.makeFirstResponder(nil)
+      identity.removeFromSuperview()
+    }
+    ExplorerTypography.configure(defaults)
     try check(!form.isValid, "Batch editor disables empty rules")
     form.prefix.stringValue = "New-"; form.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: form.prefix)); form.layoutSubtreeIfNeeded()
     try check(form.isValid && descendants(form).compactMap { ($0 as? NSTextField)?.stringValue }.contains { $0.contains(" → New-") }, "Batch editor previews source and destination names")

@@ -663,6 +663,7 @@ private final class EDNameForm: EDView, NSTextFieldDelegate {
     field.isBordered = false
     field.drawsBackground = false
     field.focusRingType = .none
+    field.cell?.usesSingleLineMode = true
     field.delegate = self
     field.setAccessibilityLabel(title)
     addSubview(label)
@@ -672,7 +673,7 @@ private final class EDNameForm: EDView, NSTextFieldDelegate {
   override func layout() {
     super.layout()
     label.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 18)
-    field.frame = NSRect(x: 10, y: 35, width: max(1, bounds.width - 20), height: 20)
+    field.frame = NSRect(x: 10, y: 29, width: max(1, bounds.width - 20), height: 31)
     extra?.frame = NSRect(x: 0, y: 75, width: bounds.width, height: 20)
   }
   override func draw(_ dirtyRect: NSRect) {
@@ -741,6 +742,7 @@ final class EDBatchRenameForm: EDView, NSTextFieldDelegate {
       field.font = ExplorerTypography.font()
       field.delegate = self
       field.isBezeled = true
+      field.cell?.usesSingleLineMode = true
       field.setAccessibilityLabel(NL("重命名规则"))
       addSubview(field)
     }
@@ -899,18 +901,27 @@ private final class EDMetadataRow: EDView {
   }
 }
 
-private final class EDPropertyIdentity: EDView {
+final class EDPropertyIdentity: EDView, NSTextFieldDelegate {
   private let image = NSImageView()
   let name = ExplorerTextField()
   init(title: String, icon: NSImage?, editable: Bool = false) {
     super.init(frame: .zero)
     image.image = icon; image.imageScaling = .scaleProportionallyUpOrDown
-    name.stringValue = title; name.isEditable = editable; name.isSelectable = true; name.identifier = .init("property-name"); name.setAccessibilityLabel(NL("名称")); name.isBordered = false; name.drawsBackground = false; name.font = ExplorerTypography.font(); name.textColor = ExplorerPalette.text
+    name.stringValue = title; name.isEditable = editable; name.isSelectable = true; name.identifier = .init("property-name"); name.setAccessibilityLabel(NL("名称")); name.isBordered = false; name.drawsBackground = false; name.focusRingType = .none; name.font = ExplorerTypography.font(); name.textColor = ExplorerPalette.text
+    name.cell?.usesSingleLineMode = true
+    name.delegate = self
     addSubview(image); addSubview(name)
   }
   required init?(coder: NSCoder) { fatalError() }
-  override func layout() { super.layout(); image.frame = NSRect(x: 0, y: 0, width: 42, height: 42); name.frame = NSRect(x: 70, y: 10, width: max(0, bounds.width - 80), height: 22) }
-  override func draw(_ dirtyRect: NSRect) { edBorder(NSRect(x: 60, y: 4, width: max(0, bounds.width - 60), height: 34)); ExplorerPalette.border.setFill(); NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill() }
+  override func layout() { super.layout(); image.frame = NSRect(x: 0, y: 0, width: 42, height: 42); name.frame = NSRect(x: 70, y: 4, width: max(0, bounds.width - 80), height: 34) }
+  override func draw(_ dirtyRect: NSRect) {
+    let input = NSRect(x: 60, y: 4, width: max(0, bounds.width - 60), height: 34)
+    edBorder(input, color: name.currentEditor() == nil ? ExplorerPalette.border : ExplorerPalette.accent)
+    ExplorerPalette.border.setFill()
+    NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill()
+  }
+  func controlTextDidBeginEditing(_ notification: Notification) { needsDisplay = true }
+  func controlTextDidEndEditing(_ notification: Notification) { needsDisplay = true }
 }
 private final class EDPropertyAttribute: EDView {
   private let label = edLabel(NL("属性")), toggle: EDButton

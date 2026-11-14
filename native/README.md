@@ -98,9 +98,15 @@ python3 -I scripts/check-homebrew-install.py
 python3 -I native/scripts/smoke.py --validation
 ```
 
-检查脚本默认通过 macOS 正常前台启动应用，满足活动窗口相关断言；可用 `--direct-launch` 单独诊断直接进程启动。
+默认在后台运行独立 AppKit 测试入口，覆盖导航、分组、批量重命名、偏好设置等用例，并检查没有可见窗口。报告位于 `native/output/navigation-ui-checks/report.json`。核心检查和构建命令也在后台运行。
 
-测试构建使用独立 Bundle ID；文件操作使用临时目录、模拟回收站和命名剪贴板。检查包含真实 AppKit 控件及独立窗口的生命周期、视图设置、操作快捷键等入口。应用内事件驱动不等同于外部辅助功能或真实 Finder 操作；根目录旧的 `native/output/smoke/` 报告不代表本轮新检查结果。普通构建也可运行 `smoke.py`，但应先关闭对应原型实例。
+需要验证 LaunchServices 启动、活动窗口、拖放或窗口生命周期时，显式运行：
+
+```sh
+python3 -I native/scripts/smoke.py --validation --foreground
+```
+
+前台验证版使用独立 Bundle ID，文件操作使用临时目录、模拟回收站和命名剪贴板，报告位于 `native/output/validation/smoke/`。`--direct-launch` 直接运行应用可执行文件作诊断，也会显示窗口。对普通构建运行前台检查前，先关闭对应的原型实例。
 
 标准 XCTest 用例位于 `Tests/ExplorerCoreTests/`，需要包含 XCTest 的完整工具链；只有实际执行 `swift test --package-path native` 成功后才能报告通过。
 

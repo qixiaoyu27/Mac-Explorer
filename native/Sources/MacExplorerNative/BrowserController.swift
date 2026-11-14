@@ -1877,19 +1877,12 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     guard let field else { return }
     renamingEntry = entry; renameField = field; field.identifier = NSUserInterfaceItemIdentifier(entry.id)
     field.stringValue = entry.name; field.isEditable = true; field.isSelectable = true; field.isBordered = true; field.drawsBackground = true; field.backgroundColor = ExplorerPalette.surface; field.textColor = ExplorerPalette.text; field.focusRingType = .none
+    field.cell?.usesSingleLineMode = true
     field.delegate = self; field.target = self; field.action = #selector(commitInlineRename)
     field.superview?.needsLayout = true; field.superview?.layoutSubtreeIfNeeded()
     view.window?.makeFirstResponder(field)
     let stem = entry.isDirectory || entry.url.pathExtension.isEmpty ? entry.name : entry.url.deletingPathExtension().lastPathComponent
     if let editor = field.currentEditor() as? NSTextView {
-      if mode == .details, let font = field.font {
-        let height = NSLayoutManager().defaultLineHeight(for: font)
-        let centered = NSRect(x: 2, y: (field.bounds.height - height) / 2, width: editor.bounds.width, height: height)
-        if let clip = editor.superview as? NSClipView {
-          clip.frame = field.convert(centered, to: clip.superview)
-          editor.frame = NSRect(origin: .zero, size: centered.size)
-        }
-      }
       editor.setSelectedRange(NSRange(location: 0, length: (stem as NSString).length))
     }
   }
@@ -1917,7 +1910,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
   private func cancelInlineRename() {
     guard let field = renameField else { renamingEntry = nil; return }
     renamingEntry = nil; renameField = nil; field.delegate = nil; field.target = nil; field.action = nil
-    field.abortEditing(); field.isEditable = false; field.isSelectable = false; field.isBordered = false; field.drawsBackground = false; field.superview?.needsLayout = true
+    field.abortEditing(); field.cell?.usesSingleLineMode = false; field.isEditable = false; field.isSelectable = false; field.isBordered = false; field.drawsBackground = false; field.superview?.needsLayout = true
   }
   @objc private func commitInlineRename() {
     guard let entry = renamingEntry, let field = renameField, field.identifier?.rawValue == entry.id else { cancelInlineRename(); return }

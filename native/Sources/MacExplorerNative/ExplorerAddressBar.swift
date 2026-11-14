@@ -193,6 +193,7 @@ final class ExplorerSearchBox: NSView {
   override init(frame: NSRect) {
     super.init(frame: frame)
     field.isBordered = false; field.drawsBackground = false; field.focusRingType = .none
+    field.cell?.usesSingleLineMode = true
     field.font = ExplorerTypography.font(); field.textColor = ExplorerPalette.text
     field.target = self; field.action = #selector(submit)
     field.setAccessibilityLabel(NL("搜索文件"))

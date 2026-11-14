@@ -415,7 +415,32 @@ final class ExplorerRootView: SurfaceView {
   override var mouseDownCanMoveWindow: Bool { false }
 }
 
+private final class ExplorerTextFieldCell: NSTextFieldCell {
+  private func centeredFrame(_ frame: NSRect) -> NSRect {
+    guard usesSingleLineMode, isEditable || isSelectable, let font else { return frame }
+    let borderHeight: CGFloat = isBezeled ? 4 : (isBordered ? 2 : 0)
+    let height = min(frame.height, ceil(NSLayoutManager().defaultLineHeight(for: font)) + borderHeight)
+    return NSRect(x: frame.minX, y: frame.midY - height / 2, width: frame.width, height: height)
+  }
+
+  override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
+    super.drawInterior(withFrame: centeredFrame(cellFrame), in: controlView)
+  }
+
+  override func edit(withFrame cellFrame: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?, event: NSEvent?) {
+    super.edit(withFrame: centeredFrame(cellFrame), in: controlView, editor: textObj, delegate: delegate, event: event)
+  }
+
+  override func select(withFrame cellFrame: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?, start selStart: Int, length selLength: Int) {
+    super.select(withFrame: centeredFrame(cellFrame), in: controlView, editor: textObj, delegate: delegate, start: selStart, length: selLength)
+  }
+}
+
 class ExplorerTextField: NSTextField {
+  override class var cellClass: AnyClass? {
+    get { ExplorerTextFieldCell.self }
+    set { super.cellClass = newValue }
+  }
   override func draw(_ dirtyRect: NSRect) {
     NSGraphicsContext.saveGraphicsState()
     super.draw(dirtyRect)
@@ -547,7 +572,7 @@ final class NameCell: NSTableCellView {
     icon.frame = NSRect(x: left, y: (bounds.height - iconSize) / 2, width: iconSize, height: iconSize)
     let height: CGFloat = max(nameLabel.isEditable ? 24 : 17, ceil(nameLabel.font?.ascender ?? 13) - floor(nameLabel.font?.descender ?? -3) + 2)
     let textLeading = Self.textLeading(checkboxes: checkboxes)
-    nameLabel.frame = NSRect(x: textLeading - (nameLabel.isEditable ? 2 : 0), y: (bounds.height - height) / 2, width: max(0, min(nameLabel.isEditable ? 240 : bounds.width, bounds.width - textLeading - MetadataCell.textInset)), height: height)
+    nameLabel.frame = NSRect(x: textLeading - (nameLabel.isEditable ? 1 : 0), y: (bounds.height - height) / 2, width: max(0, min(nameLabel.isEditable ? 240 : bounds.width, bounds.width - textLeading - MetadataCell.textInset)), height: height)
   }
   func configure(_ entry: FileEntry, name: String? = nil) {
     nameLabel.font = ExplorerTypography.font()
@@ -555,7 +580,7 @@ final class NameCell: NSTableCellView {
     nameLabel.stringValue = name ?? entry.name; nameLabel.textColor = ExplorerPalette.text
     alphaValue = entry.isHidden ? 0.6 : 1; toolTip = entry.url.path; icon.show(entry)
   }
-  override func prepareForReuse() { super.prepareForReuse(); icon.clear(); checkbox.changed = nil; nameLabel.delegate = nil; nameLabel.abortEditing(); nameLabel.isEditable = false; nameLabel.isSelectable = false; nameLabel.isBordered = false; nameLabel.drawsBackground = false }
+  override func prepareForReuse() { super.prepareForReuse(); icon.clear(); checkbox.changed = nil; nameLabel.delegate = nil; nameLabel.abortEditing(); nameLabel.cell?.usesSingleLineMode = false; nameLabel.isEditable = false; nameLabel.isSelectable = false; nameLabel.isBordered = false; nameLabel.drawsBackground = false }
 }
 final class TopStackView: NSStackView { override var isFlipped: Bool { true } }
 final class MetadataCell: NSTableCellView {
@@ -1080,7 +1105,8 @@ final class IconItem: NSCollectionViewItem {
       pathLabel.frame = NSRect(x: width * 0.57, y: top + line + 4, width: width * 0.43 - 12, height: line)
     } else {
       icon.frame = NSRect(x: (width - size) / 2, y: 8, width: size, height: size)
-      nameLabel.frame = NSRect(x: 5, y: size + 14, width: width - 10, height: max(36, ExplorerTypography.lineHeight * 2))
+      let nameHeight = nameLabel.isEditable ? ExplorerTypography.lineHeight + 6 : max(36, ExplorerTypography.lineHeight * 2)
+      nameLabel.frame = NSRect(x: 5, y: size + 14, width: width - 10, height: nameHeight)
     }
   }
   func configure(_ entry: FileEntry, name: String? = nil, mode: ExplorerLayoutMode = .icons, size: CGFloat = 64, checkboxes: Bool = false) {
@@ -1108,5 +1134,5 @@ final class IconItem: NSCollectionViewItem {
       }
     }
   }
-  override func prepareForReuse() { super.prepareForReuse(); surface.selected = false; icon.clear(); checkbox.changed = nil; nameLabel.delegate = nil; nameLabel.abortEditing(); nameLabel.isEditable = false; nameLabel.isSelectable = false; nameLabel.isBordered = false; nameLabel.drawsBackground = false }
+  override func prepareForReuse() { super.prepareForReuse(); surface.selected = false; icon.clear(); checkbox.changed = nil; nameLabel.delegate = nil; nameLabel.abortEditing(); nameLabel.cell?.usesSingleLineMode = false; nameLabel.isEditable = false; nameLabel.isSelectable = false; nameLabel.isBordered = false; nameLabel.drawsBackground = false }
 }

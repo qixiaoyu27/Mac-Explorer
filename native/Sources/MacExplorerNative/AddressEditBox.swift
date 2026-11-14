@@ -53,6 +53,7 @@ final class AddressEditBox: NSView, NSTextFieldDelegate {
     field.isBordered = false
     field.drawsBackground = false
     field.focusRingType = .none
+    field.cell?.usesSingleLineMode = true
     field.font = ExplorerTypography.font()
     field.textColor = ExplorerPalette.text
     field.delegate = self
