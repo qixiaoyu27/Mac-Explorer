@@ -92,7 +92,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     register(window, browser: browser)
     if smoke == nil && comparison == nil { window.setFrameAutosaveName("NativeExplorerWindow") }
     if smoke != nil || comparison != nil { window.setFrame(NSRect(x: 0, y: 0, width: 1180, height: 780), display: false) }
-    window.center()
+    Self.position(window, at: nil)
     focusMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { event in
       ExplorerFocus.keyboardVisible = event.type == .keyDown
       (NSApp.keyWindow?.firstResponder as? NSView)?.needsDisplay = true
@@ -138,7 +138,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
   }
 
   @discardableResult
-  func createWindow(tab: BrowserTab, source: BrowserController?, at point: NSPoint, show: Bool = true) -> NSWindow {
+  func createWindow(tab: BrowserTab, source: BrowserController?, at point: NSPoint?, show: Bool = true) -> NSWindow {
     let defaults = source?.defaults ?? sessionDefaults ?? .standard
     if sessionDefaults == nil { sessionDefaults = defaults }
     let controller = BrowserController(initial: tab.directory, defaults: defaults)
@@ -159,12 +159,18 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     return next
   }
 
-  static func position(_ window: NSWindow, at point: NSPoint) {
-    guard let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? window.screen ?? NSScreen.main else { return }
+  static func position(_ window: NSWindow, at point: NSPoint?) {
+    let screenPoint = point ?? NSEvent.mouseLocation
+    guard let screen = NSScreen.screens.first(where: { $0.frame.contains(screenPoint) }) ?? window.screen ?? NSScreen.main else { return }
     let bounds = screen.visibleFrame
     let size = NSSize(width: min(window.frame.width, bounds.width), height: min(window.frame.height, bounds.height))
-    let origin = NSPoint(x: max(bounds.minX, min(point.x - 160, bounds.maxX - size.width)), y: max(bounds.minY, min(point.y - size.height + 24, bounds.maxY - size.height)))
-    window.setFrame(NSRect(origin: origin, size: size), display: true)
+    let origin: NSPoint
+    if let point {
+      origin = NSPoint(x: max(bounds.minX, min(point.x - 160, bounds.maxX - size.width)), y: max(bounds.minY, min(point.y - size.height + 24, bounds.maxY - size.height)))
+    } else {
+      origin = NSPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2)
+    }
+    window.setFrame(NSRect(origin: origin, size: size), display: point != nil)
   }
 
   private func activate(_ owner: NSWindow) {
@@ -187,8 +193,8 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     createNewWindow()
   }
 
-  private var nextWindowPosition: NSPoint {
-    window.map { NSPoint(x: $0.frame.minX + 180, y: $0.frame.maxY - 20) } ?? NSEvent.mouseLocation
+  private var nextWindowPosition: NSPoint? {
+    window.map { NSPoint(x: $0.frame.minX + 180, y: $0.frame.maxY - 20) }
   }
 
   private var sessionHome: URL {
@@ -210,8 +216,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
   }
   func openDesktopFolder(_ url: URL) {
     let source = browser ?? BrowserController(initial: url, defaults: sessionDefaults ?? .standard)
-    let point = window.map { NSPoint(x: $0.frame.minX + 180, y: $0.frame.maxY - 20) } ?? NSEvent.mouseLocation
-    createWindow(tab: BrowserTab(history: [url]), source: source, at: point)
+    createWindow(tab: BrowserTab(history: [url]), source: source, at: nextWindowPosition)
     NSApp.activate(ignoringOtherApps: true)
   }
   @objc private func dockNewTab() {

@@ -121,6 +121,10 @@ enum NativeExternalOpenChecks {
     reopened.application(NSApp, open: [target])
     try check(presented.map(\.directory) == [root.path] && presented.first?.activate == true, "A warm file-open request presents one window already at its target folder")
     guard let reopenedBrowser = reopened.browser, let reopenedWindow = reopened.window else { throw NativeSmoke.Failure(description: "File-open did not create a browser window") }
+    if let bounds = (reopenedWindow.screen ?? NSScreen.main)?.visibleFrame {
+      let frame = reopenedWindow.frame
+      try check(abs(frame.midX - bounds.midX) < 1 && abs(frame.midY - bounds.midY) < 1, "The first window is centered in the screen's usable area")
+    }
     try await loaded(root, in: reopenedBrowser)
     try check(reopened.browserWindows.count == 1 && reopenedBrowser.tabs.count == 1 && reopenedBrowser.tabs[0].history.map(\.path) == [root.path], "The configured startup folder does not enter the reopened window's history")
     try check(reopenedBrowser.selectedPaths == [target.path], "The reopened window selects the requested file on its first load")
