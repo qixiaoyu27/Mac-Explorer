@@ -47,7 +47,8 @@ enum NativeExternalOpenChecks {
       }
       current.view.layoutSubtreeIfNeeded(); current.collection.layoutSubtreeIfNeeded()
     }
-    func visible(_ url: URL) -> Bool {
+    func visible(_ url: URL, in current: BrowserController? = nil) -> Bool {
+      let browser = current ?? browser
       guard let index = browser.entries.firstIndex(where: { $0.id == url.path }), let row = browser.displayRows.firstIndex(where: { $0.entry == index }) else { return false }
       if browser.mode == .details { return browser.table.visibleRect.intersects(browser.table.rect(ofRow: row)) }
       guard let rect = browser.collectionLayout.layoutAttributesForItem(at: IndexPath(item: row, section: 0))?.frame else { return false }
@@ -98,6 +99,36 @@ enum NativeExternalOpenChecks {
     delegate.application(NSApp, open: [target]); try await loaded(root)
     try check(delegate.window === window && delegate.browserWindows.count == 2, "Routing reuses the available active-Space window")
     try check(!window.isVisible && !spareWindow.isVisible, "External routing checks display no windows")
+
+    let start = root.appendingPathComponent("Startup", isDirectory: true)
+    try fm.createDirectory(at: start, withIntermediateDirectories: true)
+    defaults.set(NativeStartLocation.custom.rawValue, forKey: NativeStartLocation.preferenceKey)
+    defaults.set(start.path, forKey: NativeStartLocation.customPathKey)
+    let savedMenu = NSApp.mainMenu, savedWindowsMenu = NSApp.windowsMenu
+    var presented: [(directory: String, activate: Bool)] = []
+    let reopened = ApplicationDelegate(presentBrowserWindow: { owner, activate in
+      guard let controller = owner.contentViewController as? BrowserController else { return }
+      presented.append((controller.directory.path, activate))
+      _ = controller.view
+      controller.viewDidAppear()
+    })
+    defer {
+      for owner in reopened.browserWindows { owner.close() }
+      NSApp.mainMenu = savedMenu; NSApp.windowsMenu = savedWindowsMenu
+    }
+    reopened.createWindow(tab: BrowserTab(history: [start]), source: browser, at: .zero, show: false).close()
+    try check(reopened.browserWindows.isEmpty && reopened.browser == nil, "Closing the last browser leaves a running delegate with zero windows")
+    reopened.application(NSApp, open: [target])
+    try check(presented.map(\.directory) == [root.path] && presented.first?.activate == true, "A warm file-open request presents one window already at its target folder")
+    guard let reopenedBrowser = reopened.browser, let reopenedWindow = reopened.window else { throw NativeSmoke.Failure(description: "File-open did not create a browser window") }
+    try await loaded(root, in: reopenedBrowser)
+    try check(reopened.browserWindows.count == 1 && reopenedBrowser.tabs.count == 1 && reopenedBrowser.tabs[0].history.map(\.path) == [root.path], "The configured startup folder does not enter the reopened window's history")
+    try check(reopenedBrowser.selectedPaths == [target.path], "The reopened window selects the requested file on its first load")
+    try check(visible(target, in: reopenedBrowser), "The reopened window scrolls to the requested file on its first load")
+    try check(reopenedBrowser.defaults === defaults && !reopenedWindow.isVisible, "The reopened browser keeps its preferences and is tested without displaying a window")
+    reopenedWindow.close()
+    reopened.application(NSApp, open: [])
+    try check(reopened.browserWindows.isEmpty && presented.count == 1, "An empty open request does not recreate the closed window")
     return checks
   }
 }

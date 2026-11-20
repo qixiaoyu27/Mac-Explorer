@@ -27,6 +27,14 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
   private var preserveWindowsOnExit: Bool?
   private var updateInstaller: (() throws -> Void)?
   private var updateTerminationError: Error?
+  private let presentBrowserWindow: (NSWindow, Bool) -> Void
+
+  init(presentBrowserWindow: @escaping (NSWindow, Bool) -> Void = { owner, activateApp in
+    owner.makeKeyAndOrderFront(nil)
+    if activateApp { NSApp.activate(ignoringOtherApps: true) }
+  }) {
+    self.presentBrowserWindow = presentBrowserWindow
+  }
 
   private func argument(_ flag: String) -> String? {
     guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
@@ -65,7 +73,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     systemIntegration?.desktop.onFocus = { [weak self] in self?.makeMenus() }
     systemIntegration?.desktop.onLanguageChange = { [weak self] mode in self?.setLanguage(mode, defaults: defaults) }
     versionControl.setEnabled(defaults.object(forKey: "versionControl") as? Bool ?? true)
-    let home = ProcessInfo.processInfo.environment["EXPLORER_NATIVE_HOME"].map { URL(fileURLWithPath: $0) } ?? FileManager.default.homeDirectoryForCurrentUser
+    let home = sessionHome
     browser = BrowserController(initial: NativeStartLocation.initialURL(explicit: quitFixture == nil ? explicitLocation : nil, defaults: defaults, home: home), defaults: defaults)
     if smoke != nil || comparison != nil { browser.filePasteboard = NSPasteboard(name: .init("local.macexplorer.native-test.\(ProcessInfo.processInfo.processIdentifier)")) }
     if let comparison {
@@ -130,13 +138,15 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
   }
 
   @discardableResult
-  func createWindow(tab: BrowserTab, source: BrowserController, at point: NSPoint) -> NSWindow {
-    if sessionDefaults == nil { sessionDefaults = source.defaults }
-    lastHomeDirectory = source.home
-    let controller = BrowserController(initial: tab.directory, defaults: source.defaults)
-    controller.home = source.home; controller.testTrashDirectory = source.testTrashDirectory; controller.filePasteboard = source.filePasteboard
+  func createWindow(tab: BrowserTab, source: BrowserController?, at point: NSPoint, show: Bool = true) -> NSWindow {
+    let defaults = source?.defaults ?? sessionDefaults ?? .standard
+    if sessionDefaults == nil { sessionDefaults = defaults }
+    let controller = BrowserController(initial: tab.directory, defaults: defaults)
+    controller.home = source?.home ?? sessionHome
+    lastHomeDirectory = controller.home
+    if let source { controller.testTrashDirectory = source.testTrashDirectory; controller.filePasteboard = source.filePasteboard }
     controller.adopt(tab)
-    let size = source.view.window?.frame.size ?? NSSize(width: 1260, height: 820)
+    let size = source?.view.window?.frame.size ?? NSSize(width: 1260, height: 820)
     let next = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
     next.titleVisibility = .hidden; next.titlebarAppearsTransparent = true; next.backgroundColor = .explorerChrome
     next.isReleasedWhenClosed = false; next.minSize = NSSize(width: 800, height: 530)
@@ -144,7 +154,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     next.contentViewController = controller
     Self.position(next, at: point)
     register(next, browser: controller)
-    next.makeKeyAndOrderFront(nil)
+    if show { presentBrowserWindow(next, false) }
     activate(next)
     return next
   }
@@ -174,17 +184,29 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     }
   }
   @objc private func newWindow() {
-    let home = lastHomeDirectory ?? FileManager.default.homeDirectoryForCurrentUser
-    let source = browser ?? BrowserController(initial: home, defaults: sessionDefaults ?? .standard)
-    if browser == nil { source.home = home }
-    let top = window.map { NSPoint(x: $0.frame.minX + 180, y: $0.frame.maxY - 20) } ?? NSEvent.mouseLocation
-    createWindow(tab: BrowserTab(history: [NativeStartLocation.load(source.defaults).url(home: source.home, defaults: source.defaults)]), source: source, at: top)
+    createNewWindow()
+  }
+
+  private var nextWindowPosition: NSPoint {
+    window.map { NSPoint(x: $0.frame.minX + 180, y: $0.frame.maxY - 20) } ?? NSEvent.mouseLocation
+  }
+
+  private var sessionHome: URL {
+    lastHomeDirectory ?? ProcessInfo.processInfo.environment["EXPLORER_NATIVE_HOME"].map { URL(fileURLWithPath: $0) } ?? FileManager.default.homeDirectoryForCurrentUser
+  }
+
+  private func createNewWindow(show: Bool = true) {
+    let defaults = browser?.defaults ?? sessionDefaults ?? .standard
+    let home = browser?.home ?? sessionHome
+    let location = NativeStartLocation.load(defaults).url(home: home, defaults: defaults)
+    createWindow(tab: BrowserTab(history: [location]), source: browser, at: nextWindowPosition, show: show)
   }
 
   private func summon() {
     if window == nil { newWindow() }
-    if window?.isMiniaturized == true { window?.deminiaturize(nil) }
-    window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+    guard let window else { return }
+    if window.isMiniaturized { window.deminiaturize(nil) }
+    presentBrowserWindow(window, true)
   }
   func openDesktopFolder(_ url: URL) {
     let source = browser ?? BrowserController(initial: url, defaults: sessionDefaults ?? .standard)
@@ -212,8 +234,8 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
   }
 
   func application(_ application: NSApplication, open urls: [URL]) {
+    guard !urls.isEmpty else { return }
     if browser == nil && sessionDefaults == nil { pendingExternalURLs += urls; return }
-    if browser == nil { newWindow() }
     openExternal(urls)
   }
   func application(_ sender: NSApplication, openFiles filenames: [String]) {
@@ -221,17 +243,23 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
   }
   private func openExternal(_ urls: [URL]) {
     let (groups, unavailable) = BrowserController.externalGroups(urls)
-    useExternalWindow()
-    if let first = groups.first { browser.openExternal(first) }
+    if let owner = externalWindow() {
+      if owner !== window { activate(owner) }
+      if let first = groups.first { browser.openExternal(first) }
+    } else if let first = groups.first {
+      createWindow(tab: first.initialTab, source: browser, at: nextWindowPosition, show: false)
+    } else {
+      createNewWindow(show: false)
+    }
     for group in groups.dropFirst() { browser.openTab(at: group.directory); browser.openExternal(group) }
     if unavailable > 0 { browser.reportUnavailableExternalItems() }
     summon()
   }
   // A window on another Space or behind a dialog would hide the result, so it stays untouched.
-  private func useExternalWindow() {
+  private func externalWindow() -> NSWindow? {
     let usable = { (owner: NSWindow) in owner.isOnActiveSpace && owner.attachedSheet == nil && !ExplorerDialogs.isPresenting(in: owner) }
-    if let current = window, usable(current) { return }
-    if let other = browserWindows.last(where: usable) { activate(other) } else { newWindow() }
+    if let current = window, usable(current) { return current }
+    return browserWindows.last(where: usable)
   }
   func applicationWillTerminate(_ notification: Notification) {
     systemIntegration?.close(); versionControl.setEnabled(false)

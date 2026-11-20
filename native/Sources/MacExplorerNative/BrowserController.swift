@@ -2566,6 +2566,19 @@ extension BrowserController {
 struct ExternalOpenGroup {
   let directory: URL
   var selection: [URL] = []
+
+  var initialTab: BrowserTab {
+    BrowserTab(history: [directory.standardizedFileURL], locationStates: [0: locationState()])
+  }
+
+  func locationState(preserving state: BrowserLocationState = BrowserLocationState()) -> BrowserLocationState {
+    let parent = directory.standardizedFileURL
+    let paths = selection.map { parent.appendingPathComponent($0.lastPathComponent).path }
+    guard let first = paths.first else { return state }
+    var state = state
+    state.requestedPaths = Set(paths); state.revealPath = first
+    return state
+  }
 }
 
 extension BrowserController {
@@ -2586,9 +2599,7 @@ extension BrowserController {
     navigate(to: group.directory)
     guard !group.selection.isEmpty else { return }
     // Replaces the state navigate prepared, which would otherwise reveal the previous folder.
-    let paths = group.selection.map { directory.appendingPathComponent($0.lastPathComponent).path }
-    var state = pendingLocationState ?? BrowserLocationState()
-    state.requestedPaths = Set(paths); state.revealPath = paths[0]
+    let state = group.locationState(preserving: pendingLocationState ?? BrowserLocationState())
     tabs[activeTab].locationStates[tabs[activeTab].index] = state
     prepareLocationState(state)
   }
