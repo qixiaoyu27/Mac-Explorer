@@ -59,7 +59,7 @@ private func drawExplorerImage(_ image: NSImage, in rect: NSRect, fraction: CGFl
   image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: fraction, respectFlipped: true, hints: nil)
 }
 
-private func drawExplorerFocus(in rect: NSRect) {
+func drawExplorerFocus(in rect: NSRect) {
   ExplorerPalette.accent.setStroke()
   let path = NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: 4, yRadius: 4)
   path.lineWidth = 2

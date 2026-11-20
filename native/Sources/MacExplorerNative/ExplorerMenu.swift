@@ -114,6 +114,7 @@ final class ExplorerMenu: NSObject {
   private let shadowPanel: NSPanel
   private var child: ExplorerMenu?
   private var monitor: Any?
+  private var quickButtons: [MenuQuickAction] = []
   private var rows: [MenuRow] = []
   private var selected = -1
   private var loadingChildren: Task<Void, Never>?
@@ -183,6 +184,8 @@ final class ExplorerMenu: NSObject {
     let contentWidth = scroll.contentSize.width
     surface.frame.size.width = contentWidth
     if hasQuickActions {
+      background.focusRingType = .none
+      panel.initialFirstResponder = background
       var x = 1 + inset
       for (index, (item, size)) in zip(quickActions, quickSizes).enumerated() {
         if index > 0 {
@@ -194,6 +197,7 @@ final class ExplorerMenu: NSObject {
         let button = MenuQuickAction(item: item)
         button.frame = NSRect(x: x, y: 1 + inset, width: size.width, height: buttonHeight)
         button.fill.install(behind: button, in: background)
+        quickButtons.append(button)
         x += size.width
       }
       let line = SurfaceView(frame: NSRect(x: 1, y: topInset - 1, width: width - 2, height: 1))
@@ -259,16 +263,30 @@ final class ExplorerMenu: NSObject {
     if item.hasSubmenu { highlight(index); return }
     Self.dismiss(); item.action?()
   }
+  private func focusQuickAction(backward: Bool) -> Bool {
+    let enabled = quickButtons.filter(\.isEnabled)
+    guard !enabled.isEmpty else { return false }
+    let step = backward ? -1 : 1
+    let current = enabled.firstIndex { $0 === panel.firstResponder } ?? (backward ? 0 : -1)
+    closeChild()
+    if rows.indices.contains(selected) { rows[selected].highlighted = false }
+    selected = -1
+    return panel.makeFirstResponder(enabled[(current + step + enabled.count) % enabled.count])
+  }
   private func handleKey(_ event: NSEvent) -> Bool {
     if let child, child.panel.isKeyWindow { return child.handleKey(event) }
     switch event.keyCode {
     case 53: Self.dismiss()
+    case 48: return focusQuickAction(backward: event.modifierFlags.contains(.shift))
     case 125, 126:
       let delta = event.keyCode == 125 ? 1 : -1
-      var index = selected
+      var index = selected < 0 && delta < 0 ? 0 : selected
       for _ in rows.indices {
         index = (index + delta + rows.count) % rows.count
-        if rows[index].item.enabled { highlight(index); break }
+        if rows[index].item.enabled {
+          if panel.firstResponder is MenuQuickAction { panel.makeFirstResponder(panel.initialFirstResponder) }
+          highlight(index); break
+        }
       }
     case 124: child?.panel.makeKeyAndOrderFront(nil); child?.highlight(0)
     case 123:
@@ -277,7 +295,9 @@ final class ExplorerMenu: NSObject {
         parent.closeChild()
         parent.rows[parent.selected].highlighted = true
       } else { Self.dismiss() }
-    case 36, 49: activate(selected)
+    case 36, 49, 76:
+      if let button = panel.firstResponder as? MenuQuickAction, button.isEnabled { button.performClick(nil) }
+      else { activate(selected) }
     default: return false
     }
     return true
@@ -307,6 +327,7 @@ private final class MenuShadowSurface: NSView {
 
 private final class MenuSurface: NSView {
   override var isFlipped: Bool { true }
+  override var acceptsFirstResponder: Bool { true }
   override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); needsDisplay = true }
   override func draw(_ dirtyRect: NSRect) {
     MenuAppearance.background.setFill()
@@ -388,6 +409,7 @@ private final class MenuQuickAction: NSButton {
 
   init(item: ExplorerMenuItem) {
     self.item = item; super.init(frame: .zero); title = item.title; isEnabled = item.enabled; isBordered = false; target = self; action = #selector(invoke); toolTip = item.title + (item.shortcut.isEmpty ? "" : "（\(item.shortcut)）")
+    focusRingType = .none
   }
   required init?(coder: NSCoder) { fatalError() }
   override var isFlipped: Bool { true }
@@ -395,6 +417,8 @@ private final class MenuQuickAction: NSButton {
   override func updateTrackingAreas() { super.updateTrackingAreas(); trackingAreas.forEach(removeTrackingArea); addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)) }
   override func mouseEntered(with event: NSEvent) { hovered = true }
   override func mouseExited(with event: NSEvent) { hovered = false }
+  override func becomeFirstResponder() -> Bool { needsDisplay = true; return super.becomeFirstResponder() }
+  override func resignFirstResponder() -> Bool { needsDisplay = true; return super.resignFirstResponder() }
   override func mouseDown(with event: NSEvent) {
     pressed = isEnabled
     super.mouseDown(with: event)
@@ -409,6 +433,7 @@ private final class MenuQuickAction: NSButton {
     attributes[.foregroundColor] = ExplorerPalette.text.withAlphaComponent(isEnabled ? 1 : 0.35)
     let label = NSRect(x: 0, y: Self.titleY, width: bounds.width, height: bounds.height - Self.titleY)
     (title as NSString).draw(with: label, options: .usesLineFragmentOrigin, attributes: attributes)
+    if isEnabled && window?.firstResponder === self && ExplorerFocus.keyboardVisible { drawExplorerFocus(in: bounds) }
   }
 }
 

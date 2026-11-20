@@ -53,15 +53,31 @@ enum NativeInteractionChecks {
     func check(_ condition: Bool, _ label: String) throws { guard condition else { throw NativeSmoke.Failure(description: label) }; checks.append(label); print("PASS interaction: \(label)") }
     func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
     for titles in [["剪切", "复制", "重命名", "移到回收站"], ["Cut", "Copy", "Rename", "Move to Trash"]] {
-      ExplorerMenu.show([ExplorerMenuItem(title: "Open")], at: NSPoint(x: window.frame.minX + 50, y: window.frame.maxY - 100), owner: window, quickActions: titles.map { ExplorerMenuItem(title: $0) })
+      var invoked: String?
+      let quickActions = titles.enumerated().map { index, title in
+        ExplorerMenuItem(title: title, enabled: index != 1, action: { invoked = title })
+      }
+      ExplorerMenu.show([ExplorerMenuItem(title: "Open")], at: NSPoint(x: window.frame.minX + 50, y: window.frame.maxY - 100), owner: window, quickActions: quickActions)
       guard let menu = window.childWindows?.last, let body = menu.contentView else { throw NativeSmoke.Failure(description: "Quick-action menu is visible") }
       let buttons = descendants(body).compactMap { $0 as? NSButton }.filter { titles.contains($0.title) }
       try check(buttons.count == titles.count, "All quick-action buttons are present")
+      try check(menu.firstResponder === body && buttons.allSatisfy { $0.focusRingType == .none }, "The menu opens without a quick action receiving AppKit's focus ring")
       for button in buttons {
         let textWidth = (button.title as NSString).size(withAttributes: [.font: ExplorerTypography.font(ofSize: 12)]).width
         try check(button.bounds.width == min(120, max(60, ceil(textWidth))), "Quick-action button fits \(button.title) within the template limits")
       }
-      ExplorerMenu.dismiss()
+      func key(_ code: UInt16, _ characters: String, modifiers: NSEvent.ModifierFlags = []) {
+        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: menu.windowNumber, context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code)!
+        NSApp.sendEvent(event)
+      }
+      key(48, "\t")
+      try check((menu.firstResponder as? NSButton)?.title == titles[0], "Tab focuses the first quick action")
+      key(48, "\t")
+      try check((menu.firstResponder as? NSButton)?.title == titles[2], "Tab skips disabled quick actions")
+      key(48, "\t", modifiers: .shift)
+      try check((menu.firstResponder as? NSButton)?.title == titles[0], "Shift-Tab moves back to the first quick action")
+      key(36, "\r")
+      try check(invoked == titles[0] && !menu.isVisible, "Return runs the focused quick action and dismisses the menu")
     }
     for title in ["项目复选框", "文件扩展名", "隐藏的项目"] {
       let before = browser.viewMenu().flatMap(\.children).first { $0.title == title }!.checked
