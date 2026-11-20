@@ -69,7 +69,9 @@ public final class NativeVersionControl: @unchecked Sendable {
   private let backupDirectory: URL
   public init(backupDirectory: URL) { self.backupDirectory = backupDirectory }
   public func setEnabled(_ value: Bool) {
-    lock.lock(); enabled = value; generation += 1; cache.removeAll(); plans.removeAll()
+    lock.lock()
+    guard enabled != value else { lock.unlock(); return }
+    enabled = value; generation += 1; cache.removeAll(); plans.removeAll()
     let processes = Array(reads.values); reads.removeAll(); lock.broadcast(); lock.unlock()
     for process in processes where process.isRunning { process.terminate() }
   }

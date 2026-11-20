@@ -100,7 +100,9 @@ struct VCSChecks {
     try check(try service.prepare(directory: root, action: .commit, paths: [root]).changes.count == 3, "Literal pathspec names stage")
     try write(file, "staged\n"); _ = try git(root, "add", "--", file.path); try write(file, "precious unstaged\n")
     let diff = try service.diff(directory: root, paths: [file]); try check(diff.staged.contains("staged") && diff.working.contains("precious"), "Staged and working diffs")
-    let commit = try service.prepare(directory: root, action: .commit, paths: [file]); _ = try service.execute(id: commit.id, message: "commit staged only")
+    let commit = try service.prepare(directory: root, action: .commit, paths: [file])
+    service.setEnabled(true)
+    _ = try service.execute(id: commit.id, message: "commit staged only")
     try check(try git(root, "show", "HEAD:src/文件 name.txt") == "staged\n", "Commit staged snapshot")
     try check(try read(file) == "precious unstaged\n", "Commit preserves working data")
     try rejects("失效") { _ = try service.execute(id: commit.id, message: "again") }
@@ -157,10 +159,12 @@ struct VCSChecks {
     let finished = DispatchSemaphore(value: 0)
     DispatchQueue.global().async { _ = try? blocked.status(directory: blockedRoot); finished.signal() }
     try check(finished.wait(timeout: .now() + 0.2) == .timedOut, "Fixture status is actually blocked")
+    blocked.setEnabled(true)
+    try check(finished.wait(timeout: .now() + 0.2) == .timedOut, "Reapplying the enabled preference leaves a pending status process running")
     blocked.setEnabled(false)
     try check(finished.wait(timeout: .now() + 2) == .success, "Disable terminates a pending status process")
     try check(try blocked.status(directory: blockedRoot) == nil, "Disabled cache remains empty")
-    print("PASS: Git parsing, aggregation, aliases, boundaries, staging, commit, backup, stale plans, symlinks, fast-forward, worktrees, disable")
+    print("PASS: Git parsing, aggregation, aliases, boundaries, staging, commit, backup, stale plans, symlinks, fast-forward, worktrees, enabled preference reapplication, disable")
     if fm.isExecutableFile(atPath: "/opt/homebrew/bin/svn"), fm.isExecutableFile(atPath: "/opt/homebrew/bin/svnadmin") {
       try checkSVN(temporary)
     } else { print("SKIP: SVN tools not installed") }
