@@ -54,6 +54,10 @@ run_brew() {
 progress '检查 Mac Explorer 更新' '檢查 Mac Explorer 更新' 'Checking for Mac Explorer updates'
 run_brew update --quiet
 run_brew tap qixiaoyu27/tap
+# Older Homebrew versions lack the built-in trust command.
+if [[ $("$brew" command trust 2>/dev/null) == */Library/Homebrew/cmd/trust.rb ]]; then
+  run_brew trust --cask "$cask"
+fi
 "$brew" info --json=v2 --cask "$cask" > "$work/info.json"
 latest=$(/usr/bin/plutil -extract casks.0.version raw -o - "$work/info.json")
 checksum=$(/usr/bin/plutil -extract casks.0.sha256 raw -o - "$work/info.json")

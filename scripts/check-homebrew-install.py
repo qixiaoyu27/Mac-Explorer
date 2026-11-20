@@ -52,7 +52,17 @@ elif name == 'brew':
     action = args[0]
     if state.get('fail') == action:
         print('fixture Homebrew failure', file=sys.stderr); sys.exit(7)
-    if action == 'info':
+    if action == 'command':
+        assert args == ['command', 'trust']
+        if state.get('old_brew'): sys.exit(1)
+        print('/opt/homebrew/Library/Homebrew/cmd/trust.rb')
+    elif action == 'trust':
+        assert args == ['trust', '--cask', 'qixiaoyu27/tap/mac-explorer']
+        assert ['tap', 'qixiaoyu27/tap'] in state['commands']
+        state['trusted'] = True; save()
+    elif action == 'info':
+        if not state.get('old_brew') and not state.get('trusted'):
+            print('Refusing to load the untrusted cask', file=sys.stderr); sys.exit(1)
         print(json.dumps({'casks': [{
             'version': state['latest'], 'installed': state.get('registered'),
             'sha256': state.get('checksum', 'a' * 64),
@@ -142,6 +152,8 @@ with tempfile.TemporaryDirectory(prefix='me-brew-checks-') as temporary:
         checks += 1
 
     check('fresh', actions=['install'], expected='已安装 Mac Explorer 1.2.3')
+    check('old-brew', old_brew=True, actions=['install'], expected='已安装')
+    check('trust-failure', fail='trust', success=False, expected='fixture Homebrew failure')
     check('older-metadata', omit_target=True, actions=['install'], expected='已安装')
     check('bootstrap', bootstrap=True, actions=['install'], expected='已安装')
     check('bootstrap-failure', bootstrap=True, bootstrap_fail=True, success=False, expected='未完成')
