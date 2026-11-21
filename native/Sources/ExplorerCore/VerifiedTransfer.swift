@@ -529,7 +529,7 @@ enum VerifiedTransfer {
           case .retry: continue
           case .continueWithoutProperties: warning = NL("部分文件属性无法保留：{0}", output.path)
           case .cancel: throw CancellationError()
-          case .skip, .keepBoth: throw error
+          case .skip, .keepBoth, .replace: throw error
           }
           break
         }

@@ -786,7 +786,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
       guard let service = NSSharingService(named: .sendViaAirDrop), service.canPerform(withItems: urls) else { operationError = NL("隔空投送不可用"); render(); return false }
       service.perform(withItems: urls); return true
     }
-    runTransferOperation { control in FileActions.transfer(urls, to: target, move: operation == .move, control: control) }; return true
+    runFileTransfer(urls, to: target, move: operation == .move); return true
   }
   private func layoutSidebarRows() {
     let width = sidebarScroll.contentSize.width
@@ -1951,12 +1951,12 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     guard !busy, writable else { return }; readClipboard()
     let sources = clipboard, target = directory, move = isCut, version = clipboardChange
     guard !sources.isEmpty else { return }
-    runTransferOperation(completion: { [weak self] result in
+    runFileTransfer(sources, to: target, move: move, completion: { [weak self] result in
       guard let self, move, self.clipboardChange == version else { return }
       let moved = Set((result.consumedMoveSources + result.succeeded.filter { sources.contains($0) }).map(\.path))
       self.clipboard.removeAll { moved.contains($0.path) }; if self.clipboard.isEmpty { self.isCut = false }
       if self.filePasteboard.changeCount == version { self.writeClipboard() }
-    }) { control in FileActions.transfer(sources, to: target, move: move, control: control) }
+    })
   }
   // Cached mount classification keeps menu/selection updates free of network I/O.
   var deletionNetworkLocation: ((URL) -> Bool?)? {
@@ -2276,7 +2276,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     case "redo": redoFiles()
     case "move-here":
       clipboard = (filePasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []; clipboardChange = filePasteboard.changeCount; isCut = true; pasteFiles()
-    case "duplicate": guard writable else { return }; let sources = selectedEntries().map(\.url), target = directory; runTransferOperation { control in FileActions.transfer(sources, to: target, move: false, control: control) }
+    case "duplicate": guard writable else { return }; let sources = selectedEntries().map(\.url), target = directory; runFileTransfer(sources, to: target, move: false)
     case "select-all": selectAllFiles()
     case "new-folder": createEntry(directory: true)
     case "trash": trashSelected()
@@ -2395,7 +2395,7 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     let operation = dropOperation(info, target: target, fromTab: fromTab)
     let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
     guard !urls.isEmpty, !operation.isEmpty else { return false }
-    runTransferOperation { control in FileActions.transfer(urls, to: target, move: operation == .move, control: control) }; return true
+    runFileTransfer(urls, to: target, move: operation == .move); return true
   }
   func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) { finishedDragging(operation) }
   func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, dragOperation operation: NSDragOperation) { finishedDragging(operation) }

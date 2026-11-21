@@ -875,6 +875,8 @@
   "仍然复制": "Copy anyway",
   "仍然移动": "Move anyway",
   "传输文件": "File transfer",
+  "替换": "Replace",
+  "替换会将目标中的现有文件移入回收站。": "Replacing moves the existing file to the Recycle Bin.",
   "保留两者": "Keep both",
   "恢复位置：{0}": "Recovery location: {0}",
   "操作中断": "Operation interrupted",

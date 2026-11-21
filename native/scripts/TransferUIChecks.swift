@@ -93,7 +93,9 @@ import ObjectiveC
       browser.setView(mode, size: 64); browser.view.layoutSubtreeIfNeeded()
       let row = browser.entries.firstIndex { $0.url.path == folder.path }!
       let host: NSView = mode == .details ? browser.table : browser.collection
-      let drag = TransferUIDrag(view: host, board: board, point: .zero)
+      let frame = mode == .details ? browser.table.rect(ofRow: row)
+        : browser.collection.layoutAttributesForItem(at: IndexPath(item: row, section: 0))!.frame
+      let drag = TransferUIDrag(view: host, board: board, point: NSPoint(x: frame.midX, y: frame.midY))
       for mask: NSDragOperation in [.move, .copy] {
         drag.draggingSourceOperationMask = mask
         board.clearContents(); board.writeObjects([folder as NSURL, existing as NSURL])
@@ -108,16 +110,20 @@ import ObjectiveC
         }
         try check(offered.isEmpty && !accepted && !browser.busy && browser.lastError == nil, "\(mode): releasing a selection onto its own folder silently rejects \(mask == .move ? "move" : "copy")")
       }
-      board.clearContents(); board.writeObjects([folder as NSURL, existing as NSURL]); drag.draggingSourceOperationMask = .move
+      board.clearContents(); board.writeObjects([folder as NSURL, existing as NSURL])
+      let viewport = browser.content.fileViewport
+      let background = TransferUIDrag(view: browser.content, board: board, point: NSPoint(x: viewport.maxX - 5, y: viewport.maxY - 5))
+      background.draggingSourceOperationMask = .move
       let backgroundAccepted = mode == .details
-        ? browser.tableView(browser.table, acceptDrop: drag, row: -1, dropOperation: .on)
-        : browser.collectionView(browser.collection, acceptDrop: drag, indexPath: IndexPath(item: browser.entries.count, section: 0), dropOperation: .before)
+        ? browser.tableView(browser.table, acceptDrop: background, row: -1, dropOperation: .on)
+        : browser.collectionView(browser.collection, acceptDrop: background, indexPath: IndexPath(item: browser.entries.count, section: 0), dropOperation: .before)
       try check(backgroundAccepted, "\(mode): background release still accepts a same-directory move")
       try await until { !browser.busy && !browser.loading }
       try check(browser.lastError == nil && (try Data(contentsOf: payload)) == Data("preserved".utf8) && (try Data(contentsOf: existing)) == Data("existing".utf8), "\(mode): same-directory release leaves files intact without a warning")
       let incoming = source.appendingPathComponent("incoming.txt"), moved = folder.appendingPathComponent("incoming.txt")
       try Data("incoming".utf8).write(to: incoming)
       board.clearContents(); board.writeObjects([incoming as NSURL])
+      drag.draggingSourceOperationMask = .move
       let movedIntoFolder = mode == .details
         ? browser.tableView(browser.table, acceptDrop: drag, row: row, dropOperation: .on)
         : browser.collectionView(browser.collection, acceptDrop: drag, indexPath: IndexPath(item: row, section: 0), dropOperation: .on)
@@ -135,32 +141,47 @@ import ObjectiveC
     let breadcrumbDrag = TransferUIDrag(view: breadcrumb, board: board, point: .zero)
     try check(breadcrumb.draggingEntered(breadcrumbDrag).isEmpty && !breadcrumb.performDragOperation(breadcrumbDrag), "Address breadcrumbs reject their own folder without starting a transfer")
     board.clearContents(); board.writeObjects([existing as NSURL])
-    let copy = TransferUIDrag(view: browser.collection, board: board, point: .zero)
+    let viewport = browser.content.fileViewport
+    let copy = TransferUIDrag(view: browser.content, board: board, point: NSPoint(x: viewport.maxX - 5, y: viewport.maxY - 5))
     try check(browser.collectionView(browser.collection, acceptDrop: copy, indexPath: IndexPath(item: browser.entries.count, section: 0), dropOperation: .before), "Copying within the current folder is still accepted")
     try await until { !browser.busy && !browser.loading }
     let duplicate = browser.entries.first { $0.url != existing && !$0.isDirectory }
     try check(browser.lastError == nil && duplicate != nil && (try Data(contentsOf: duplicate!.url)) == Data("existing".utf8), "Same-directory copying creates a numbered duplicate")
     try fm.removeItem(at: duplicate!.url)
     board.clearContents(); board.writeObjects([file as NSURL])
-    for action in ["skip", "sheet-cancel", "escape", "cancel", "close", "keep-both", "retry"] {
+    let trash = root.appendingPathComponent("trash")
+    try fm.createDirectory(at: trash, withIntermediateDirectories: false)
+    browser.testTrashDirectory = trash
+    for action in ["skip", "sheet-cancel", "escape", "cancel", "close", "keep-both", "retry", "replace"] {
       fputs("Collision fixture: \(action)\n", stderr)
+      if action == "replace" { try Data("replace-original".utf8).write(to: existing) }
       let panel = NativeTransferPanel(parent: window, showsWindows: false)
       var result: FileActionResult?
-      browser.runTransferOperation(panel: panel, completion: { result = $0 }) { control in FileActions.transfer([file], to: target, move: false, control: control) }
+      let store = browser.trashStore
+      browser.runTransferOperation(panel: panel, completion: { result = $0 }) { control in
+        FileActions.transfer([file], to: target, move: false, control: control, testTrash: trash, trashStore: store)
+      }
       try await until { panel.pendingAlert != nil }
       let alert = panel.pendingAlert!.0
       if action == "close" { panel.window.performClose(nil) }
       else if action == "cancel" { panel.cancel.performClick(nil) }
       else {
         if action == "retry" { try fm.moveItem(at: existing, to: target.appendingPathComponent("previous.txt")) }
-        let offset = action == "retry" ? 0 : action == "keep-both" ? 1 : action == "sheet-cancel" ? 3 : 2
+        let titles = ["retry": "重试", "keep-both": "保留两者", "skip": "跳过", "sheet-cancel": "取消", "replace": "替换"]
+        let offset = alert.buttons.firstIndex { $0.title == NL(titles[action] ?? "取消") } ?? -1
         panel.resolve(alert, response: action == "escape" ? .cancel : .init(rawValue: NSApplication.ModalResponse.alertFirstButtonReturn.rawValue + offset))
       }
       try await until { !browser.busy && result != nil }
       try check(panel.pendingAlert == nil && panel.control == nil && !panel.window.isVisible, "\(action): collision resolves the worker and closes its transfer panel")
       try check(try Data(contentsOf: file) == Data("source".utf8), "\(action): resolving a copy collision preserves the source")
-      let old = action == "retry" ? target.appendingPathComponent("previous.txt") : existing
-      try check(try Data(contentsOf: old) == Data("existing".utf8), "\(action): collision never overwrites the existing file")
+      let old = action == "replace" ? trash.appendingPathComponent("item.txt")
+        : action == "retry" ? target.appendingPathComponent("previous.txt") : existing
+      let priorContents = action == "replace" ? "replace-original" : "existing"
+      try check(try Data(contentsOf: old) == Data(priorContents.utf8), "\(action): the previous destination remains recoverable")
+      if action == "replace" {
+        try check(result!.errors.isEmpty && result!.succeeded == [existing] && (try Data(contentsOf: existing)) == Data("source".utf8), "Replace publishes the copied file at the requested name")
+        try check(store.original(old)?.resolvingSymlinksInPath().path == existing.resolvingSymlinksInPath().path, "Replace records the recycled file's original location")
+      }
       if action == "keep-both" || action == "retry" { try check(result!.succeeded.count == 1, "\(action): selected collision decision finishes the copy") }
       panel.resolve(alert, response: .alertFirstButtonReturn)
       if action == "keep-both" { try fm.removeItem(at: result!.succeeded[0]) }

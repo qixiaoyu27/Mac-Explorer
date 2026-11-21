@@ -6,8 +6,12 @@ import subprocess
 import tempfile
 
 root = pathlib.Path(__file__).resolve().parents[1]
-subprocess.run(["swift", "build", "--package-path", str(root), "-c", "release"], check=True)
-build = pathlib.Path(subprocess.check_output(["swift", "build", "--package-path", str(root), "-c", "release", "--show-bin-path"], text=True).strip())
+build_command = ["swift", "build", "--package-path", str(root), "-c", "release"]
+# The harness links individual SwiftPM objects from the native build layout.
+if "--build-system" in subprocess.check_output(["swift", "build", "--help"], text=True):
+    build_command += ["--build-system", "native"]
+subprocess.run(build_command, check=True)
+build = pathlib.Path(subprocess.check_output(build_command + ["--show-bin-path"], text=True).strip())
 output = root / "output" / "transfer-ui-checks"
 output.mkdir(parents=True, exist_ok=True)
 report = output / "report.json"

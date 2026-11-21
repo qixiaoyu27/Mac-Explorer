@@ -170,6 +170,47 @@ struct MetadataTransferChecks {
       try check(try Data(contentsOf:file)==Data("NEW".utf8) && clean(target),"changed source bytes retained and stage cleaned")
     }
     do {
+      let trash = root.appendingPathComponent("replace-trash")
+      try fm.createDirectory(at: trash, withIntermediateDirectories: false)
+      let original = Data("existing".utf8), copied = Data("OK".utf8), occupant = Data("concurrent".utf8)
+      for scenario in ["success", "stale", "copy-failure", "late-collision", "link"] {
+        let (file, target, dest) = try fixture("replace-" + scenario)
+        if scenario == "link" { try fm.createSymbolicLink(atPath: dest.path, withDestinationPath: "missing") }
+        else { try original.write(to: dest) }
+        var choices: [Bool] = []
+        var hooks = TransferHooks()
+        hooks.control = FileTransferControl(onProblem: { problem in
+          choices.append(problem.canReplace)
+          if scenario == "stale" { try! occupant.write(to: dest, options: .atomic) }
+          return .replace
+        })
+        hooks.checkpoint = { checkpoint, _, _ in
+          if scenario == "copy-failure", checkpoint == .beforeCopy { throw VerifiedTransfer.posix(EIO) }
+          if scenario == "late-collision", checkpoint == .beforePublish { try occupant.write(to: dest, options: .withoutOverwriting) }
+        }
+        let result = FileActions.transfer([file], to: target, move: false, hooks: hooks, testTrash: trash)
+        try check(choices == [scenario != "link"] && (try Data(contentsOf: file)) == copied, "\(scenario): eligibility and source preservation")
+        switch scenario {
+        case "success":
+          try check(result.errors.isEmpty && result.succeeded.count == 1 && (try Data(contentsOf: dest)) == copied, "Replace publishes the new copy")
+          try check(result.changes.map(\.kind) == [.trash, .copy], "Replace records both file changes")
+          let undone = FileActions.undo(result.changes, testTrash: trash)
+          try check(undone.errors.isEmpty && (try Data(contentsOf: dest)) == original, "Undo restores the original destination")
+          let redone = FileActions.undo(undone.changes, testTrash: trash)
+          try check(redone.errors.isEmpty && (try Data(contentsOf: dest)) == copied, "Redo restores the actual copied file")
+        case "link":
+          try check(result.succeeded.isEmpty && (try fm.destinationOfSymbolicLink(atPath: dest.path)) == "missing", "Replace preserves dangling destination links")
+        case "late-collision":
+          try check(result.succeeded.isEmpty && (try Data(contentsOf: dest)) == occupant && result.changes.count == 1, "Rollback leaves a new destination occupant untouched")
+          let backup = result.changes[0].destination
+          try check((try Data(contentsOf: backup)) == original && result.errors.contains { $0.contains(backup.path) }, "Rollback reports where the original can be recovered")
+        default:
+          let expected = scenario == "stale" ? occupant : original
+          try check(result.succeeded.isEmpty && result.changes.isEmpty && (try Data(contentsOf: dest)) == expected, "\(scenario): failed replacement preserves the destination")
+        }
+      }
+    }
+    do {
       let(file,target,dest)=try fixture("unlink-error")
       var hooks=TransferHooks();hooks.checkpoint={stage,_,_ in if stage == .beforeRemove { throw VerifiedTransfer.posix(EACCES) }}
       let result=transfer(file,target,hooks:hooks)

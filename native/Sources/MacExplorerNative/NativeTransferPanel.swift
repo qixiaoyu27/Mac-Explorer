@@ -113,6 +113,10 @@ final class NativeTransferPanel: NSObject, NSWindowDelegate {
       alert.addButton(withTitle: NL("保留两者")); decisions.append(.keepBoth)
     }
     alert.addButton(withTitle: NL("跳过")); decisions.append(.skip)
+    if value.canReplace {
+      alert.informativeText += "\n" + NL("替换会将目标中的现有文件移入回收站。")
+      alert.addButton(withTitle: NL("替换")); decisions.append(.replace)
+    }
     alert.addButton(withTitle: NL("取消")); decisions.append(.cancel)
     alert.buttons.last?.keyEquivalent = "\u{1b}"
     present(alert) { response in
@@ -131,6 +135,13 @@ private final class TransferDecisionReply: @unchecked Sendable {
 }
 
 extension BrowserController {
+  func runFileTransfer(_ sources: [URL], to target: URL, move: Bool, completion: ((FileActionResult) -> Void)? = nil) {
+    let testTrash = testTrashDirectory, store = trashStore
+    runTransferOperation(completion: completion) { control in
+      FileActions.transfer(sources, to: target, move: move, control: control, testTrash: testTrash, trashStore: store)
+    }
+  }
+
   func runTransferOperation(recordUndo: Bool = true, panel: NativeTransferPanel? = nil, completion: ((FileActionResult) -> Void)? = nil, _ operation: @escaping @Sendable (FileTransferControl) -> FileActionResult) {
     guard !busy else { return }
     let panel = panel ?? NativeTransferPanel(parent: view.window)

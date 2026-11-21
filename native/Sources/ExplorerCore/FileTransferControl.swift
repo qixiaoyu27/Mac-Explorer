@@ -1,7 +1,7 @@
 import Foundation
 import Darwin
 
-public enum FileTransferDecision: Sendable { case retry, skip, cancel, keepBoth, continueWithoutProperties }
+public enum FileTransferDecision: Sendable { case retry, skip, cancel, keepBoth, replace, continueWithoutProperties }
 public struct FileTransferProblem: Sendable {
   public let source: URL
   public let destination: URL
@@ -9,8 +9,10 @@ public struct FileTransferProblem: Sendable {
   public let propertyLoss: Bool
   public var moving: Bool = false
   public var collision: Bool = false
-  public init(source: URL, destination: URL, message: String, propertyLoss: Bool, moving: Bool = false, collision: Bool = false) {
+  public let canReplace: Bool
+  public init(source: URL, destination: URL, message: String, propertyLoss: Bool, moving: Bool = false, collision: Bool = false, canReplace: Bool = false) {
     self.source = source; self.destination = destination; self.message = message; self.propertyLoss = propertyLoss; self.moving = moving; self.collision = collision
+    self.canReplace = canReplace
   }
 }
 public enum FileTransferMode: Sendable { case system, serverSide }

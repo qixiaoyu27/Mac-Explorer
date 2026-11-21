@@ -367,12 +367,12 @@ public enum FileActions {
     return result.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
-  public static func transfer(_ sources: [URL], to directory: URL, move: Bool, control: FileTransferControl? = nil) -> FileActionResult {
+  public static func transfer(_ sources: [URL], to directory: URL, move: Bool, control: FileTransferControl? = nil, testTrash: URL? = nil, trashStore: TrashStore? = nil) -> FileActionResult {
     var hooks = TransferHooks(); hooks.control = control
-    return transfer(sources, to: directory, move: move, hooks: hooks)
+    return transfer(sources, to: directory, move: move, hooks: hooks, testTrash: testTrash, trashStore: trashStore)
   }
 
-  static func transfer(_ sources: [URL], to directory: URL, move: Bool, hooks: TransferHooks) -> FileActionResult {
+  static func transfer(_ sources: [URL], to directory: URL, move: Bool, hooks: TransferHooks, testTrash: URL? = nil, trashStore: TrashStore? = nil) -> FileActionResult {
     var succeeded: [URL] = []
     var errors: [String] = []
     var changes: [FileActionChange] = []
@@ -413,7 +413,22 @@ public enum FileActions {
         if canRetry, typed?.handled != true, hooks.control?.isCancelled != true, !(error is CancellationError) {
           let candidate = directory.appendingPathComponent(destinationName)
           let collision = (try? entryInfo(candidate)) != nil
-          let decision = hooks.control?.decide(FileTransferProblem(source: input, destination: candidate, message: error.localizedDescription, propertyLoss: false, collision: collision)) ?? .skip
+          let replacement = !move && collision && isCollision(error) && hooks.control != nil
+            ? try? CopyReplacement(source: input, destination: candidate) : nil
+          let decision = hooks.control?.decide(FileTransferProblem(source: input, destination: candidate, message: error.localizedDescription, propertyLoss: false, collision: collision, canReplace: replacement != nil)) ?? .skip
+          if decision == .replace, let replacement {
+            do {
+              let item = try replacement.copy(hooks: hooks, testTrash: testTrash, trashStore: trashStore, changes: &changes, errors: &errors)
+              transfers.append(item)
+              if let message = item.message { errors.append(message) }
+              succeeded.append(candidate)
+              changes.append(FileActionChange(source: replacement.source, destination: item.destination, kind: .copy))
+            } catch {
+              if let failure = error as? FileTransferFailure { transfers.append(failure.item) }
+              errors.append("\(input.path): \(error.localizedDescription)")
+            }
+            break
+          }
           if decision == .keepBoth, collision {
             for number in 2...10_000 {
               guard let name = try? numberedName(input, suffix: " (\(number))") else { break }
@@ -432,6 +447,70 @@ public enum FileActions {
       }
     }
     return FileActionResult(succeeded: succeeded, errors: errors, changes: changes, transfers: transfers)
+  }
+
+  private struct CopyReplacement {
+    let source: URL
+    let destination: URL
+    let incoming: TransferStamp
+    let previous: TransferStamp
+    let parent: TransferStamp
+    let recycle: PreparedDeletion
+
+    init(source: URL, destination: URL) throws {
+      self.source = try existingURL(source)
+      self.destination = try existingURL(destination)
+      incoming = TransferStamp(try requiredInfo(self.source))
+      previous = TransferStamp(try requiredInfo(self.destination))
+      guard incoming.type == S_IFREG, previous.type == S_IFREG, !incoming.sameObject(previous) else {
+        throw posixError(destination, code: EINVAL)
+      }
+      parent = TransferStamp(try directoryInfo(destination.deletingLastPathComponent()))
+      recycle = try PreparedDeletion.prepare([self.destination])[0]
+    }
+
+    func copy(hooks: TransferHooks, testTrash: URL?, trashStore: TrashStore?, changes: inout [FileActionChange], errors: inout [String]) throws -> FileTransferItem {
+      try hooks.control?.check()
+      let original = try recycle.validateForRecycle()
+      guard parent.sameObject(TransferStamp(try directoryInfo(original.deletingLastPathComponent()))) else {
+        throw posixError(destination, code: ESTALE)
+      }
+      try incoming.requireUnchanged(TransferStamp(try requiredInfo(source)), control: hooks.control, stage: "replace.source.changed")
+      try previous.requireUnchanged(TransferStamp(try requiredInfo(original)), control: hooks.control, stage: "replace.destination.changed")
+      let recycled = trash([original], testTrash: testTrash)
+      guard let backup = recycled.changes.first else {
+        throw failure(recycled.errors.joined(separator: "\n"))
+      }
+      func rememberBackup() {
+        if backup.destinationIdentity == previous.identity { changes.append(backup) }
+        do { try trashStore?.remember(backup.destination, original: original) }
+        catch { errors.append(NL("文件已移入回收站，但无法保存原位置。请使用“还原到…”恢复。")) }
+      }
+      do {
+        guard previous.unchanged(TransferStamp(try requiredInfo(backup.destination)), ignoreChangeTime: true),
+          parent.sameObject(TransferStamp(try directoryInfo(destination.deletingLastPathComponent()))) else {
+          throw posixError(destination, code: ESTALE)
+        }
+        try incoming.requireUnchanged(TransferStamp(try requiredInfo(source)), control: hooks.control, stage: "replace.source.changed")
+        let item = try VerifiedTransfer.perform(source, to: original, move: false, hooks: hooks)
+        rememberBackup()
+        return item
+      } catch {
+        let copyError = error
+        do {
+          guard let identity = backup.destinationIdentity, try FileActions.identity(backup.destination) == identity,
+            parent.sameObject(TransferStamp(try directoryInfo(original.deletingLastPathComponent()))) else {
+            throw posixError(destination, code: ESTALE)
+          }
+          // Restore exclusively, including when a new occupant appeared while copying.
+          try moveExclusively(backup.destination, to: original)
+        } catch {
+          rememberBackup()
+          errors.append(NL("恢复位置：{0}", backup.destination.path))
+        }
+        throw copyError
+      }
+    }
   }
 
   public static func trash(_ sources: [URL], testTrash: URL? = nil) -> FileActionResult {
