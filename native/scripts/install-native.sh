@@ -5,6 +5,25 @@ export LC_ALL=C
 fail() { printf '安装失败：%s\n' "$*" >&2; exit 1; }
 [[ "$(uname -s)" == Darwin && "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" == 1 ]] || fail '需要 Apple Silicon Mac。'
 [[ "$(sw_vers -productVersion | cut -d. -f1)" -ge 13 && "$EUID" -ne 0 ]] || fail '需要 macOS 13 或更高版本，请勿使用 sudo。'
+install_and_open=0
+allow_unnotarized="${MAC_EXPLORER_ALLOW_UNNOTARIZED:-0}"
+case "$#:${1:-}" in
+  0:) ;;
+  1:--install-and-open)
+    [[ -t 0 ]] || fail '请在终端运行此命令并确认安装。'
+    printf '%s\n' 'Mac Explorer 未经 Apple 公证。继续会移除本次安装的应用的下载隔离标记，并打开应用。' >&2
+    printf '%s\n' 'Mac Explorer is not Apple-notarized. Continuing removes download quarantine from this copy and opens the app.' >&2
+    printf '继续 / Continue? [y/N] ' >&2
+    if ! IFS= read -r answer || [[ "$answer" != [yY] ]]; then
+      printf '已取消安装 / Installation canceled.\n'
+      exit 0
+    fi
+    install_and_open=1
+    allow_unnotarized=1
+    ;;
+  *) fail '无效的安装选项。' ;;
+esac
+[[ "$allow_unnotarized" == 0 || "$allow_unnotarized" == 1 ]] || fail 'MAC_EXPLORER_ALLOW_UNNOTARIZED 只能是 0 或 1。'
 repo='https://github.com/qixiaoyu27/Mac-Explorer'
 install_dir="${MAC_EXPLORER_NATIVE_INSTALL_DIR:-${MAC_EXPLORER_INSTALL_DIR:-/Applications}}"
 prepared="${MAC_EXPLORER_NATIVE_PREPARED:-${MAC_EXPLORER_PREPARED_UPDATE:-}}"
@@ -17,8 +36,6 @@ existing="$destination"
 legacy_app="$HOME/Applications/Mac Explorer.app"
 if [[ "$install_dir" == /Applications && ! -e "$destination" && ( -e "$legacy_app" || -L "$legacy_app" ) ]]; then existing="$legacy_app"; fi
 [[ ! -L "$existing" ]] || fail '已有应用是符号链接，请先自行检查。'
-allow_unnotarized="${MAC_EXPLORER_ALLOW_UNNOTARIZED:-0}"
-[[ "$allow_unnotarized" == 0 || "$allow_unnotarized" == 1 ]] || fail 'MAC_EXPLORER_ALLOW_UNNOTARIZED 只能是 0 或 1。'
 work=$(mktemp -d "${TMPDIR:-/tmp}/mac-explorer-native.XXXXXX")
 stage=''; backup=''; installed=0
 cleanup() {
@@ -60,7 +77,10 @@ if [[ -e "$existing" ]]; then
   current=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$existing/Contents/Info.plist")
   current_identity=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$existing/Contents/Info.plist")
   comparison=$(awk -v a="$current" -v b="$version" 'BEGIN{split(a,x,".");split(b,y,".");for(i=1;i<=3;i++){if(x[i]+0>y[i]+0){print 1;exit}if(x[i]+0<y[i]+0){print -1;exit}}print 0}')
-  if [[ "$comparison" == 1 || ( "$comparison" == 0 && "$current_identity" == local.macexplorer.native-prototype ) ]]; then printf '保留当前版本 v%s。\n' "$current"; exit 0; fi
+  if [[ "$comparison" == 1 || ( "$comparison" == 0 && "$current_identity" == local.macexplorer.native-prototype && "$install_and_open" == 0 ) ]]; then
+    printf '保留当前版本 v%s。\n' "$current"
+    exit 0
+  fi
 fi
 app_running() {
   /bin/ps -axo command= | /usr/bin/awk -v prefix="$existing/Contents/MacOS/" 'index($0,prefix)==1 {found=1} END{exit !found}'

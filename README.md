@@ -27,22 +27,19 @@
 打开「终端」，执行：
 
 ```sh
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/refs/heads/main/scripts/install-homebrew.sh)"
+mac_explorer_installer=$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/refs/heads/main/native/scripts/install-native.sh) && /bin/bash -c "$mac_explorer_installer" -- --install-and-open
 ```
 
-自动安装所需的 Homebrew，再安装 Mac Explorer；已有应用会检查并更新，保留个人文件和偏好设置。以后检查更新也运行同一条命令。首次安装 Homebrew 时可能需要输入 Mac 登录密码。
+终端会提示 Mac Explorer 未经 Apple 公证。输入 `y` 并按回车，安装器会校验下载包，只移除本次安装的 Mac Explorer 的下载隔离标记，然后自动打开应用。已装同版本但打不开时，也可以运行这条命令重新安装。更新前请先退出应用，个人文件和偏好设置会保留。
 
-<sub>应用支持 macOS 13 及以上 · Apple Silicon（M 系列）；Homebrew 自身的系统要求以其[官网](https://brew.sh/)为准。</sub>
-
-> **首次打开**
-> 当前版本尚未经过 Apple 公证。若 macOS 阻止打开，请确认下载来源为本仓库，再到「系统设置 → 隐私与安全性」允许打开。若系统明确提示恶意软件，请勿继续运行。
+<sub>支持 macOS 13 及以上 · Apple Silicon（M 系列）。</sub>
 
 <details>
 <summary>也可以手动安装 DMG</summary>
 
 1. 前往 [下载页面](https://github.com/qixiaoyu27/Mac-Explorer/releases/latest)，选择 **DMG** 安装包。
 2. 打开 DMG，将 **Mac Explorer** 拖入 **Applications（应用程序）**。更新时请先退出旧版本。
-3. 打开应用，按需允许访问桌面、文稿或下载文件夹。
+3. 打开应用。若 macOS 因未公证而阻止打开，请确认下载来源后，在「系统设置 → 隐私与安全性」中允许打开。
 
 </details>
 

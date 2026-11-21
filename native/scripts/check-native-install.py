@@ -4,6 +4,7 @@ import hashlib
 import os
 import pathlib
 import plistlib
+import pty
 import shutil
 import subprocess
 import tempfile
@@ -78,6 +79,51 @@ with tempfile.TemporaryDirectory(prefix='explorer-native-install-checks-') as te
     assert (destination / 'Contents/Info.plist').read_bytes() == before
     install_package(prepared('1.0.0'))
     assert (destination / 'Contents/Info.plist').read_bytes() == before
+
+    # Exercise the README command's terminal consent and same-version repair.
+    interactive_command = ['/bin/bash', '-c', installer.read_text(), '--', '--install-and-open']
+    interactive_env = dict(os.environ, MAC_EXPLORER_NATIVE_PREPARED=str(first), MAC_EXPLORER_NATIVE_INSTALL_DIR=str(install), MAC_EXPLORER_NATIVE_NO_OPEN='1')
+
+    def confirm_install(answer, env=interactive_env):
+        master, terminal = pty.openpty()
+        try:
+            os.write(master, answer)
+            return subprocess.run(interactive_command, stdin=terminal, env=env, capture_output=True, text=True, timeout=30)
+        finally:
+            os.close(terminal)
+            os.close(master)
+
+    quarantine = '0081;00000000;InstallerTest;'
+    run(['/usr/bin/xattr', '-w', 'com.apple.quarantine', quarantine, str(destination)])
+    run(['/usr/bin/xattr', '-w', 'com.apple.quarantine', quarantine, str(electron)])
+
+    def assert_quarantined(path):
+        assert run(['/usr/bin/xattr', '-p', 'com.apple.quarantine', str(path)]).stdout.strip() == quarantine
+
+    rejected = subprocess.run(interactive_command, input='y\n', env=interactive_env, capture_output=True, text=True)
+    assert rejected.returncode != 0
+    canceled = confirm_install(b'\n')
+    assert canceled.returncode == 0 and 'Installation canceled' in canceled.stdout
+    assert_quarantined(destination)
+    corrupt = prepared('1.0.0')
+    (corrupt / 'SHA256SUMS-native.txt').write_text('0' * 64 + '  Mac-Explorer-Native-1.0.0-mac-arm64.zip\n')
+    failed = confirm_install(b'y\n', dict(interactive_env, MAC_EXPLORER_NATIVE_PREPARED=str(corrupt)))
+    assert failed.returncode != 0 and '更新包校验失败' in failed.stderr
+    assert_quarantined(destination)
+    installed = confirm_install(b'y\n')
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert '已安装原生版本 v1.0.0' in installed.stdout
+    assert installed.stderr.count('[y/N]') == 1
+    assert 'com.apple.quarantine' not in run(['/usr/bin/xattr', str(destination)]).stdout
+    assert_quarantined(electron)
+    assert (destination / 'Contents/Info.plist').read_bytes() == before
+    run(['/usr/bin/codesign', '--verify', '--deep', '--strict', str(destination)])
+    fresh_install = folder / 'fresh interactive install'
+    installed = confirm_install(b'y\n', dict(interactive_env, MAC_EXPLORER_NATIVE_INSTALL_DIR=str(fresh_install)))
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert (fresh_install / 'Mac Explorer.app/Contents/Info.plist').read_bytes() == before
+    checks += 5
+
     install_package(prepared('1.0.1'))
     before = (destination / 'Contents/Info.plist').read_bytes()
     assert plistlib.loads(before)['CFBundleShortVersionString'] == '1.0.1'

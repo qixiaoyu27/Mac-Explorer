@@ -27,22 +27,19 @@ Whether you are sorting a week's downloads, choosing travel photos, or switching
 Open Terminal and run:
 
 ```sh
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/refs/heads/main/scripts/install-homebrew.sh)"
+mac_explorer_installer=$(curl -fsSL https://raw.githubusercontent.com/qixiaoyu27/Mac-Explorer/refs/heads/main/native/scripts/install-native.sh) && /bin/bash -c "$mac_explorer_installer" -- --install-and-open
 ```
 
-The command installs Homebrew if needed, then installs Mac Explorer. If the app is already installed, it checks for updates and updates it while preserving your personal files and preferences. Run the same command to check for updates later. Installing Homebrew for the first time may require your Mac login password.
+Terminal will tell you that Mac Explorer is not notarized by Apple. Type `y` and press Return to verify the download, remove the download quarantine marker from this copy of Mac Explorer, and open it automatically. Run the same command to reinstall if the installed version is current but won’t open. Quit Mac Explorer before updating. The installer preserves your personal files and preferences.
 
-<sub>The app supports macOS 13 or later on Apple Silicon (M series). See the [Homebrew website](https://brew.sh/) for Homebrew's own system requirements.</sub>
-
-> **Opening for the first time**
-> The current version is not notarized by Apple. If macOS blocks it from opening, confirm that you downloaded it from this repository, then allow it in System Settings → Privacy & Security. If macOS explicitly reports malware, do not continue.
+<sub>Supports macOS 13 or later on Apple Silicon (M series).</sub>
 
 <details>
 <summary>Install manually with a DMG</summary>
 
 1. Visit the [download page](https://github.com/qixiaoyu27/Mac-Explorer/releases/latest) and choose the **DMG** installer.
 2. Open the DMG and drag **Mac Explorer** into **Applications**. Quit the previous version before updating.
-3. Open the app and grant access to your Desktop, Documents, or Downloads folders as needed.
+3. Open the app. If macOS blocks it because it is not notarized, verify the download source and allow it in System Settings → Privacy & Security.
 
 </details>
 
