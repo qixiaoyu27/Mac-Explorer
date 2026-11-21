@@ -1579,7 +1579,10 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
 
   func sortMenu() -> [ExplorerMenuItem] {
     var items = [(NL("名称"), EntrySort.name), (NL("修改日期"), .modified), (NL("创建日期"), .created), (NL("添加日期"), .added), (NL("类型"), .kind), (NL("大小"), .size)].map { name, key in ExplorerMenuItem(title: name, checked: sort == key, action: { [weak self] in self?.sort = key; self?.saveView(group: "sort"); self?.recompute() }) }
-    items += [ExplorerMenuItem(title: NL("递增"), checked: ascending, divider: true, action: { [weak self] in self?.ascending = true; self?.saveView(group: "sort"); self?.recompute() }), ExplorerMenuItem(title: NL("递减"), checked: !ascending, action: { [weak self] in self?.ascending = false; self?.saveView(group: "sort"); self?.recompute() })]
+    items += [
+      ExplorerMenuItem(title: NL("递增"), checked: ascending, radio: true, divider: true, action: { [weak self] in self?.ascending = true; self?.saveView(group: "sort"); self?.recompute() }),
+      ExplorerMenuItem(title: NL("递减"), checked: !ascending, radio: true, action: { [weak self] in self?.ascending = false; self?.saveView(group: "sort"); self?.recompute() }),
+    ]
     items.append(ExplorerMenuItem(title: NL("文件夹优先"), checked: foldersFirst, divider: true, action: { [weak self] in self?.foldersFirst.toggle(); self?.saveView(group: "sort"); self?.recompute() }))
     return items
   }
@@ -1614,7 +1617,10 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     var items = [(NL("超大图标"), CGFloat(128)), (NL("大图标"), 64), (NL("中图标"), 48), (NL("小图标"), 32)].enumerated().map { index, option in ExplorerMenuItem(title: option.0, icon: ["viewExtra", "viewLarge", "viewMedium", "viewSmall"][index], checked: mode == .icons && iconSize == option.1, radio: true, shortcut: shortcutHint(["extra-large-icons", "icons", "medium-icons", "small-icons"][index]), action: { [weak self] in self?.setView(.icons, size: option.1) }) }
     for (index, option) in [(NL("列表"), ExplorerLayoutMode.list), (NL("详细信息"), .details), (NL("平铺"), .tiles), (NL("内容"), .content)].enumerated() { items.append(ExplorerMenuItem(title: option.0, icon: ["viewList", "viewDetails", "viewTiles", "viewContent"][index], checked: mode == option.1, radio: true, shortcut: shortcutHint(["list", "details", "tiles", "content"][index]), action: { [weak self] in self?.setView(option.1) })) }
     items.append(ExplorerMenuItem(title: NL("列"), children: columnMenu()))
-    items += [ExplorerMenuItem(title: NL("详细信息窗格"), icon: "panelRight", checked: paneMode == "details", divider: true, action: { [weak self] in self?.togglePane("details") }), ExplorerMenuItem(title: NL("预览窗格"), icon: "panelRight", checked: paneMode == "preview", action: { [weak self] in self?.togglePane("preview") }), ExplorerMenuItem(title: NL("显示"), divider: true, children: [
+    items += [
+      ExplorerMenuItem(title: NL("详细信息窗格"), icon: "panelRight", checked: paneMode == "details", radio: true, divider: true, action: { [weak self] in self?.togglePane("details") }),
+      ExplorerMenuItem(title: NL("预览窗格"), icon: "panelRight", checked: paneMode == "preview", radio: true, action: { [weak self] in self?.togglePane("preview") }),
+      ExplorerMenuItem(title: NL("显示"), divider: true, children: [
       ExplorerMenuItem(title: NL("导航窗格"), icon: "panelLeft", checked: navigationPane, action: { [weak self] in guard let self else { return }; self.navigationPane.toggle(); self.defaults.set(self.navigationPane, forKey: "navigationPane"); self.view.needsLayout = true }),
       ExplorerMenuItem(title: NL("紧凑视图"), icon: "list", checked: compact, divider: true, action: { [weak self] in guard let self else { return }; self.compact.toggle(); self.defaults.set(self.compact, forKey: "compact"); self.updateMode(persist: false) }),
       ExplorerMenuItem(title: NL("项目复选框"), icon: "check", checked: checkboxes, divider: true, action: { [weak self] in guard let self else { return }; self.checkboxes.toggle(); self.defaults.set(self.checkboxes, forKey: "checkboxes"); self.render() }),
@@ -1638,7 +1644,9 @@ final class BrowserController: NSViewController, NSMenuItemValidation, NSTableVi
     let chosen = selectedEntries(), first = selectedEntries().first
     let canPaste = !busy && writable && (!clipboard.isEmpty || filePasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]))
     let refresh = ExplorerMenuItem(title: NL("刷新"), icon: "refresh", shortcut: shortcutHint("refresh"), action: { [weak self] in self?.executeAction("refresh") })
-    let hidden = ExplorerMenuItem(title: NL("隐藏的项目"), checked: showHidden, action: { [weak self] in self?.toggleHidden() })
+    let hidden = ExplorerMenuItem(title: NL("隐藏的项目"), checked: showHidden,
+                                  selectionPlacement: viewingTrash ? .separateColumn : .iconColumn,
+                                  action: { [weak self] in self?.toggleHidden() })
     if viewingTrash {
       var items: [ExplorerMenuItem] = []
       if !chosen.isEmpty {

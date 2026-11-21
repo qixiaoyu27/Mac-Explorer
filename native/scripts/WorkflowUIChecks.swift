@@ -43,6 +43,93 @@ enum NativeWorkflowChecks {
       try check(abs(fieldLine.midY - field.bounds.midY) <= 1, "\(context): selection is vertically centered (line: \(fieldLine), field: \(field.bounds))")
     }
     try await until { !browser.loading && browser.entries.count == 91 }
+    let ordinaryCheck = MenuLayout([ExplorerMenuItem(title: "Check", checked: true)])
+    let ordinaryRadio = MenuLayout([ExplorerMenuItem(title: "Radio", checked: true, radio: true)])
+    try check(ordinaryCheck.titleX == 35 && ordinaryRadio.titleX == 28,
+              "Check-only and radio-only menus place text at x=35 and x=28 respectively")
+    let detailsTitle = NL("详细信息窗格"), previewTitle = NL("预览窗格")
+    let closedLayout = MenuLayout(browser.viewMenu())
+    for (command, expectedSelection) in [(detailsTitle, [detailsTitle]), (previewTitle, [previewTitle]), (previewTitle, [])] {
+      guard let action = browser.viewMenu().first(where: { $0.title == command })?.action else {
+        throw NativeSmoke.Failure(description: "Missing View menu command: \(command)")
+      }
+      action()
+      let menu = browser.viewMenu()
+      let panes = menu.filter { $0.title == detailsTitle || $0.title == previewTitle }
+      let layout = MenuLayout(menu)
+      try check(panes.count == 2 && panes.allSatisfy(\.radio) && panes.filter { $0.checked == true }.map(\.title) == expectedSelection,
+                "View menu pane selection matches \(expectedSelection)")
+      try check(layout.iconX == closedLayout.iconX && layout.titleX == closedLayout.titleX,
+                "View menu icons and titles stay aligned for pane selection \(expectedSelection)")
+    }
+    do {
+      let savedOptions = (browser.navigationPane, browser.compact, browser.checkboxes, browser.extensions, browser.showHidden)
+      defer { (browser.navigationPane, browser.compact, browser.checkboxes, browser.extensions, browser.showHidden) = savedOptions }
+      (browser.navigationPane, browser.compact, browser.checkboxes, browser.extensions, browser.showHidden) = (false, false, false, false, false)
+      func showOptions() -> [ExplorerMenuItem] { browser.viewMenu().first { $0.title == NL("显示") }?.children ?? [] }
+      let allOff = showOptions()
+      try check(allOff.count == 5 && allOff.allSatisfy { $0.checked == false }, "Show submenu starts with five unchecked toggles")
+      let baseline = MenuLayout(allOff)
+      for enabled in [true, false] {
+        browser.extensions = enabled
+        let options = showOptions()
+        let layout = MenuLayout(options)
+        try check(options.first { $0.title == NL("文件扩展名") }?.checked == enabled
+                  && layout.iconX == baseline.iconX && layout.titleX == baseline.titleX,
+                  "Show submenu keeps its columns when file extensions are \(enabled)")
+      }
+    }
+    do {
+      let savedOrder = browser.ascending
+      defer { browser.ascending = savedOrder }
+      for ascending in [true, false] {
+        browser.ascending = ascending
+        let menu = browser.sortMenu()
+        let directions = menu.filter { [NL("递增"), NL("递减")].contains($0.title) }
+        try check(directions.count == 2 && directions.allSatisfy(\.radio)
+                  && directions.filter { $0.checked == true }.map(\.title) == [ascending ? NL("递增") : NL("递减")]
+                  && menu.first { $0.title == NL("文件夹优先") }?.radio == false,
+                  "Sort direction uses mutually exclusive radio marks with ascending \(ascending)")
+      }
+    }
+    let hiddenOff = MenuLayout(browser.contextItems())
+    browser.showHidden = true
+    let hiddenOnItems = browser.contextItems()
+    browser.showHidden = false
+    let hiddenOn = MenuLayout(hiddenOnItems)
+    try check(hiddenOff.iconX == 12 && hiddenOff.titleX == 39 && hiddenOn.iconX == 12 && hiddenOn.titleX == 39
+              && MenuLayout.iconSize == 16 && hiddenOn.fittedWidth() == hiddenOff.fittedWidth(),
+              "File background context keeps a 16-point icon at x=12 and text at x=39 with hidden items on or off")
+    guard let hiddenItem = hiddenOnItems.first(where: { $0.title == NL("隐藏的项目") }) else {
+      throw NativeSmoke.Failure(description: "Missing hidden-items command in the file background context menu")
+    }
+    try check(hiddenItem.showsSelectionInIconColumn && hiddenOn.selectionMarkFrame(for: hiddenItem, midY: 16).midX == 20,
+              "Hidden-items checkmark is centered in the existing icon column")
+    let addressMenu = browser.addressBar.breadcrumbBar.contextMenuItems()
+    try check(addressMenu.map(\.title) == [NL("复制地址"), NL("将地址复制为文本"), NL("编辑地址"), NL("删除历史记录")]
+              && addressMenu.allSatisfy { $0.icon == nil && $0.applicationImage == nil && $0.checked == nil && !$0.radio && !$0.divider },
+              "The address context menu contains four consecutive text commands")
+    let addressLayout = MenuLayout(addressMenu, style: .addressContext)
+    let addressRowX = MenuLayout.panelInset + addressLayout.rowInset
+    try check(addressRowX == 5 && addressLayout.highlightInset == 0 && addressRowX + addressLayout.titleX == 16,
+              "Address context row and highlight start at x=5 and text at x=16 from the panel edge")
+    let sidebarRow = ExplorerSidebarRow(title: "Folder", icon: "folder") {}
+    sidebarRow.selected = true
+    for height: CGFloat in [32, 36, 40] {
+      sidebarRow.frame.size.height = height
+      guard let bitmap = sidebarRow.bitmapImageRepForCachingDisplay(in: sidebarRow.bounds) else {
+        throw NativeSmoke.Failure(description: "Cannot render sidebar selection")
+      }
+      sidebarRow.cacheDisplay(in: sidebarRow.bounds, to: bitmap)
+      let x = Int(1.5 * CGFloat(bitmap.pixelsWide) / sidebarRow.bounds.width)
+      let middle = bitmap.pixelsHigh / 2
+      let indicatorColor = bitmap.colorAt(x: x, y: middle)
+      let indicatorPixels = (0..<bitmap.pixelsHigh).filter { bitmap.colorAt(x: x, y: $0) == indicatorColor }
+      let center = CGFloat((indicatorPixels.first ?? 0) + (indicatorPixels.last ?? 0) + 1) / 2
+      let renderedHeight = CGFloat(indicatorPixels.count) * height / CGFloat(bitmap.pixelsHigh)
+      try check(abs(center - CGFloat(bitmap.pixelsHigh) / 2) <= 0.5 && abs(renderedHeight - 17) <= 1,
+                "Sidebar selection indicator is centered in the \(Int(height))-point row")
+    }
     try check(browser.groupMode == .none && browser.displayRows.count == browser.entries.count, "Grouping starts disabled")
     try check(browser.viewMenu().contains { $0.title == NL("分组依据") } && !browser.sortMenu().contains { $0.title == NL("分组依据") }, "Grouping is offered in View")
     for layout in [ExplorerLayoutMode.details, .icons, .list, .tiles, .content] {

@@ -201,12 +201,16 @@ final class BreadcrumbBar: NSView {
   func _OnContextMenu(_ event: NSEvent) {
     guard let window else { return }
     CancelDropDownRequest()
-    ExplorerMenu.show([
-      ExplorerMenuItem(title: NL("复制地址"), icon: "copy", action: { [weak self] in self?._CopyToClipboard(asItem: true) }),
+    ExplorerMenu.show(contextMenuItems(), at: window.convertPoint(toScreen: event.locationInWindow), owner: window, style: .addressContext)
+  }
+
+  func contextMenuItems() -> [ExplorerMenuItem] {
+    [
+      ExplorerMenuItem(title: NL("复制地址"), action: { [weak self] in self?._CopyToClipboard(asItem: true) }),
       ExplorerMenuItem(title: NL("将地址复制为文本"), action: { [weak self] in self?._CopyToClipboard(asItem: false) }),
       ExplorerMenuItem(title: NL("编辑地址"), action: { [weak self] in self?._GoToEditMode() }),
-      ExplorerMenuItem(title: NL("删除历史记录"), enabled: owner?.recentPaths.isEmpty == false, divider: true, action: { [weak self] in self?.owner?.DeleteHistory() }),
-    ], at: window.convertPoint(toScreen: event.locationInWindow), owner: window)
+      ExplorerMenuItem(title: NL("删除历史记录"), enabled: owner?.recentPaths.isEmpty == false, action: { [weak self] in self?.owner?.DeleteHistory() }),
+    ]
   }
 
   private func _CopyToClipboard(asItem: Bool) {
