@@ -105,7 +105,25 @@ enum NativeWorkflowChecks {
     }
     try check(hiddenItem.showsSelectionInIconColumn && hiddenOn.selectionMarkFrame(for: hiddenItem, midY: 16).midX == 20,
               "Hidden-items checkmark is centered in the existing icon column")
-    let addressMenu = browser.addressBar.breadcrumbBar.contextMenuItems()
+    let breadcrumbs = browser.addressBar.breadcrumbBar
+    let volume = URL(fileURLWithPath: "/Volumes/Test Drive", isDirectory: true)
+    let rootDropdown = breadcrumbs.dropdownItems([("Test Drive", volume)], directory: nil)
+    let rootDropdownLayout = MenuLayout(rootDropdown)
+    try check(rootDropdown.contains { $0.title == "Test Drive" && $0.icon == "drive" }
+              && rootDropdown.allSatisfy { $0.checked == nil }
+              && rootDropdownLayout.iconX == 12 && rootDropdownLayout.titleX == 39,
+              "Breadcrumb root dropdown has no selection column")
+    let childDropdown = breadcrumbs.dropdownItems([("Folder", folder)], directory: root)
+    let childDropdownLayout = MenuLayout(childDropdown)
+    try check(childDropdown.count == 1 && childDropdown[0].checked == nil
+              && childDropdownLayout.iconX == 12 && childDropdownLayout.titleX == 39,
+              "Breadcrumb child dropdown has no selection column when no entry is on the current path")
+    let parent = root.deletingLastPathComponent()
+    let sibling = parent.appendingPathComponent("Other Folder", isDirectory: true)
+    let parentDropdown = breadcrumbs.dropdownItems([("Current Folder", root), ("Other Folder", sibling)], directory: parent)
+    try check(parentDropdown.map(\.checked) == [true, nil] && MenuLayout(parentDropdown).iconX == 35,
+              "Breadcrumb ancestor dropdown reserves a selection column and marks only the current path")
+    let addressMenu = breadcrumbs.contextMenuItems()
     try check(addressMenu.map(\.title) == [NL("复制地址"), NL("将地址复制为文本"), NL("编辑地址"), NL("删除历史记录")]
               && addressMenu.allSatisfy { $0.icon == nil && $0.applicationImage == nil && $0.checked == nil && !$0.radio && !$0.divider },
               "The address context menu contains four consecutive text commands")
