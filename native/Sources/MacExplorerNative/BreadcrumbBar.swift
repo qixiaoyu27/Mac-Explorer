@@ -201,12 +201,16 @@ final class BreadcrumbBar: NSView {
   func _OnContextMenu(_ event: NSEvent) {
     guard let window else { return }
     CancelDropDownRequest()
-    ExplorerMenu.show([
-      ExplorerMenuItem(title: NL("复制地址"), icon: "copy", action: { [weak self] in self?._CopyToClipboard(asItem: true) }),
+    ExplorerMenu.show(contextMenuItems(), at: window.convertPoint(toScreen: event.locationInWindow), owner: window, style: .addressContext)
+  }
+
+  func contextMenuItems() -> [ExplorerMenuItem] {
+    [
+      ExplorerMenuItem(title: NL("复制地址"), action: { [weak self] in self?._CopyToClipboard(asItem: true) }),
       ExplorerMenuItem(title: NL("将地址复制为文本"), action: { [weak self] in self?._CopyToClipboard(asItem: false) }),
       ExplorerMenuItem(title: NL("编辑地址"), action: { [weak self] in self?._GoToEditMode() }),
-      ExplorerMenuItem(title: NL("删除历史记录"), enabled: owner?.recentPaths.isEmpty == false, divider: true, action: { [weak self] in self?.owner?.DeleteHistory() }),
-    ], at: window.convertPoint(toScreen: event.locationInWindow), owner: window)
+      ExplorerMenuItem(title: NL("删除历史记录"), enabled: owner?.recentPaths.isEmpty == false, action: { [weak self] in self?.owner?.DeleteHistory() }),
+    ]
   }
 
   private func _CopyToClipboard(asItem: Bool) {
@@ -233,20 +237,22 @@ final class BreadcrumbBar: NSView {
           return (try? NativeVolumes.list())?.map { ($0.name, $0.url) } ?? []
         }.value
         guard !Task.isCancelled, let self, let anchor, anchor.window != nil, !anchor.isHiddenOrHasHiddenAncestor else { return }
-        let next = directory.flatMap { path in self.items.first { $0.Folder.deletingLastPathComponent().path == path.path && $0.Folder.path != path.path }?.Folder.path }
-        var items: [ExplorerMenuItem]
-        if directory == nil { items = self._AddRootDropdownItems(folders) }
-        else {
-          items = folders.map { name, url in
-            self.menuItem(name: self.owner?.labelForPath?(url) ?? name, url: url, icon: "folder", checked: url.path == next)
-          }
-        }
-        if items.isEmpty { items = [ExplorerMenuItem(title: NL("没有子文件夹"), enabled: false)] }
-        ExplorerMenu.present(items, below: anchor)
+        ExplorerMenu.present(self.dropdownItems(folders, directory: directory), below: anchor)
       } catch {
         guard !Task.isCancelled else { return }
         self?.owner?.onError?(error)
       }
+    }
+  }
+
+  func dropdownItems(_ folders: [(String, URL)], directory: URL?) -> [ExplorerMenuItem] {
+    guard let directory else { return _AddRootDropdownItems(folders) }
+    guard !folders.isEmpty else { return [ExplorerMenuItem(title: NL("没有子文件夹"), enabled: false)] }
+    let next = items.first {
+      $0.Folder.deletingLastPathComponent().path == directory.path && $0.Folder.path != directory.path
+    }?.Folder.path
+    return folders.map { name, url in
+      menuItem(name: owner?.labelForPath?(url) ?? name, url: url, icon: "folder", checked: url.path == next ? true : nil)
     }
   }
 
@@ -265,7 +271,7 @@ final class BreadcrumbBar: NSView {
     return items
   }
 
-  private func menuItem(name: String, url: URL, icon: String, checked: Bool = false) -> ExplorerMenuItem {
+  private func menuItem(name: String, url: URL, icon: String, checked: Bool? = nil) -> ExplorerMenuItem {
     ExplorerMenuItem(title: name, icon: icon, checked: checked, action: { [weak self] in self?.owner?.NavigateToPidl(url) })
   }
 
