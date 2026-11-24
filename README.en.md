@@ -22,6 +22,17 @@ Switching to a Mac brings plenty of new things to enjoy, along with habits you a
 
 Whether you are sorting a week's downloads, choosing travel photos, or switching between projects, you can start with familiar workflows and gradually make the views, toolbar, and keyboard shortcuts your own.
 
+<table>
+  <tr>
+    <td align="center" width="112"><a href="https://llm.ching-jade.com/home"><img src="docs/images/qingyu-api-logo.png" width="72" alt="Qingyu API"></a></td>
+    <td>
+      <strong>Qingyu API</strong><br>
+      This is our own AI API gateway. Get more calls for less, and feel free to compare our prices with other providers. Write code, run scripts, or get through your daily work without sweating the bill.<br>
+      <a href="https://llm.ching-jade.com/home"><strong>Just curious? Come take a look at the prices.</strong></a>
+    </td>
+  </tr>
+</table>
+
 ## Download and install
 
 Open Terminal and run:

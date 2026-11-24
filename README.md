@@ -22,6 +22,17 @@
 
 无论是整理一周的下载、挑选旅行照片，还是在多个项目之间切换，你都可以用熟悉的方式开始，再慢慢把视图、工具栏和快捷键调整成自己的样子。
 
+<table>
+  <tr>
+    <td align="center" width="112"><a href="https://llm.ching-jade.com/home"><img src="docs/images/qingyu-api-logo.png" width="72" alt="青玉 API"></a></td>
+    <td>
+      <strong>青玉 API</strong><br>
+      这是我们自己的 AI API 中转站，主打一个便宜量大，欢迎和同行比价。不管是写代码、跑脚本，还是处理日常工作，想用就用不用心疼。<br>
+      <a href="https://llm.ching-jade.com/home"><strong>不管用不用，先点进来看看价格吧～</strong></a>
+    </td>
+  </tr>
+</table>
+
 ## 下载与安装
 
 打开「终端」，执行：

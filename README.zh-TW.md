@@ -22,6 +22,17 @@
 
 無論是整理一週的下載、挑選旅行照片，還是在多個專案之間切換，你都可以用熟悉的方式開始，再慢慢把檢視、工具列和快速鍵調整成自己的樣子。
 
+<table>
+  <tr>
+    <td align="center" width="112"><a href="https://llm.ching-jade.com/home"><img src="docs/images/qingyu-api-logo.png" width="72" alt="青玉 API"></a></td>
+    <td>
+      <strong>青玉 API</strong><br>
+      這是我們自己的 AI API 轉接站，主打便宜又能用得多，歡迎跟其他家比價。不管是寫程式、跑腳本，還是處理日常工作，想用就用，不用心疼。<br>
+      <a href="https://llm.ching-jade.com/home"><strong>用不用都可以先點進來看看價格～</strong></a>
+    </td>
+  </tr>
+</table>
+
 ## 下載與安裝
 
 開啟「終端機」，執行：
